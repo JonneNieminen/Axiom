@@ -1,12 +1,15 @@
 #pragma once
 #include <JuceHeader.h>
-#include <limits>
+#include "AxiomDsp.h"
+#include "Presets.h"
 
-class AxiomAudioProcessor final : public juce::AudioProcessor
+class AxiomAudioProcessor final : public juce::AudioProcessor,
+                                  private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     AxiomAudioProcessor();
-    ~AxiomAudioProcessor() override = default;
+    ~AxiomAudioProcessor() override;
+    static constexpr int numPresets = (int) axiom::factoryPresets.size();
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -19,41 +22,27 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    double getTailLengthSeconds() const override { return 4.0; }
+    int getNumPrograms() override { return numPresets; }
+    int getCurrentProgram() override { return currentPreset.load(); }
+    void setCurrentProgram (int) override;
+    const juce::String getProgramName (int) override;
     void changeProgramName (int, const juce::String&) override {}
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float> outputPeak { 0.0f };
+    /** True once any control differs from the loaded preset. */
+    std::atomic<bool> presetModified { false };
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    struct ChannelStrip
-    {
-        juce::dsp::IIR::Filter<float> inputHighPass;
-        juce::dsp::IIR::Filter<float> bass;
-        juce::dsp::IIR::Filter<float> mid;
-        juce::dsp::IIR::Filter<float> treble;
-        juce::dsp::IIR::Filter<float> presence;
-        juce::dsp::IIR::Filter<float> cabHighPass;
-        juce::dsp::IIR::Filter<float> cabResonance;
-        juce::dsp::IIR::Filter<float> cabLowPass;
-    };
-
-    std::array<ChannelStrip, 2> strips;
-    juce::Reverb reverb;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> inputGain, ampGain, masterGain, roomMix;
-    double currentSampleRate = 44100.0;
-    float lastBass = std::numeric_limits<float>::quiet_NaN();
-    float lastMiddle = std::numeric_limits<float>::quiet_NaN();
-    float lastTreble = std::numeric_limits<float>::quiet_NaN();
-    float lastPresence = std::numeric_limits<float>::quiet_NaN();
-    void updateToneFilters (float bassDb, float midDb, float trebleDb, float presenceDb);
+    axiom::AxiomDsp dsp;
+    std::atomic<int> currentPreset { 0 };
+    axiom::AxiomParams readParameters();
+    void parameterChanged (const juce::String&, float) override;
+    bool applyingPreset = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxiomAudioProcessor)
 };

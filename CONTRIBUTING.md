@@ -16,6 +16,7 @@ Open `build/Axiom_artefacts/Release/Standalone/Axiom.app` to try your changes wi
 
 - Build `Axiom_Standalone`, `Axiom_VST3` and `Axiom_AU` with no new warnings.
 - Run `git diff --check`.
+- After DSP or preset changes, configure with `-DAXIOM_BUILD_TOOLS=ON` and run `AxiomRender`; it must end with "All checks passed". Keep preset loudness within a few dB of each other.
 - Try the change in the standalone app, and in a VST3 and an AU host when it touches plugin behavior.
 
 CI builds all three targets for Apple Silicon and Intel.

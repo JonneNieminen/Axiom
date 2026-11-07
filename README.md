@@ -30,14 +30,15 @@ Everything runs locally.
 
 ## Features
 
-- **Three amp voices**: Clean, Classic and Modern preamp responses, from clear rhythm tones to tighter, higher-gain sounds.
-- **Four-band tone section**: Bass, Middle, Treble and Presence, plus input trim, gain and master level.
+- **Organic gain staging**: cascaded asymmetric tube-style stages with coupling filters, power-amp sag and 8× oversampling, so overdrive stays smooth, dynamic and free of digital fizz. It cleans up when you roll your guitar volume down.
+- **Three amp voices**: Clean (glassy, lots of headroom), Classic (plexi-style crunch) and Modern (tight, hot-rodded high gain).
+- **Tone presets**: George Lynch, Van Halen, David Gilmour, Mark Knopfler (clean and Les Paul distorted) and a huge 80s chorus clean. Every control stays adjustable.
+- **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp.
 - **Built-in cabinet**: a 2×12-style speaker response you can switch off.
-- **Room**: a small stereo reverb for a touch of ambience.
+- **Effects**: stereo chorus, a darkening stereo delay and a small room reverb.
 - **Tone Match**: analyze a short reference recording and apply a suggested voice, gain and EQ. The file never leaves your computer.
 - **Standalone app and plugins**: a desktop amp with its own audio-interface settings, plus VST3 and Audio Unit for your DAW.
-- **Mono and stereo**, any sample rate; a single-input interface feeds both sides in the standalone app.
-- **Native Mac feel**: Apple Silicon and Intel builds, resizable interface, output meter.
+- **Mono amp, stereo output**: pick Left, Right or both inputs; the amp plays through both ears, so a single-input interface sounds centred.
 
 ## Install
 
@@ -59,6 +60,21 @@ Each release also has a plugins zip. Copy `Axiom.vst3` to `~/Library/Audio/Plug-
 
 ## Using Axiom
 
+### Start from a preset
+
+Choose a starting tone in **Tone Preset**. The label switches to *Custom* as soon as you move a control.
+
+| Preset | Voice | Character |
+|---|---|---|
+| **George Lynch (Dokken)** | Modern | Tight, saturated hot-rodded Marshall with a touch of boost and delay. |
+| **Van Halen** | Classic | Cranked plexi-style crunch, bright and full, with a light chorus and slap delay. |
+| **David Gilmour** | Classic | Sustaining, singing lead with boost, long delay and a roomy reverb. |
+| **Mark Knopfler (Clean)** | Clean | Glassy, compressed clean that breaks up when you dig in. |
+| **Mark Knopfler (Les Paul Dist)** | Classic | Mid-forward, nasal crunch with a push from the boost. |
+| **80s Clean (Huge Chorus)** | Clean | Pristine clean with a wide stereo chorus and ambience. |
+
+These tones are inspired by the amps, guitars and pedals behind each sound; they are starting points, not models of any specific rig or recording. Add a guitar-appropriate **Input trim** if your interface is quiet.
+
 ### Shape your tone
 
 | Control | What it does |
@@ -68,7 +84,11 @@ Each release also has a plugins zip. Copy `Axiom.vst3` to `~/Library/Audio/Plug-
 | **Gain** | Move from clean response into saturation. |
 | **Bass · Middle · Treble · Presence** | Balance the amp's low end, body, edge and upper harmonics. |
 | **Master** | Set the output level after the amp and cabinet. |
+| **Boost** | A mid-focused overdrive in front of the amp for lead tones. |
+| **Chorus** | Stereo chorus after the cabinet. |
+| **Delay · Delay time** | Darkening stereo delay, 40 ms to 1 s. |
 | **Room** | Blend in a small stereo room reverb. |
+| **Input** | Choose Left, Right or Left + Right as the guitar source. |
 | **Cabinet Sim** | Engage the internal 2×12-style speaker response. |
 
 ### Match a reference
@@ -97,6 +117,8 @@ cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_
 
 Products appear under `build/Axiom_artefacts/Release/`. Use `x86_64` for Intel or `arm64;x86_64` for a universal binary, add `-DJUCE_DIR=/path/to/JUCE` if JUCE lives elsewhere, or use `-G Xcode` to generate an Xcode project. Open the folder in VS Code with the recommended CMake Tools extension to build from the editor.
 
+Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, and optionally writes WAV files.
+
 Build the drag-to-install DMG with `build/macos/make-dmg.sh build/Axiom_artefacts/Release/Standalone/Axiom.app 1.0.0 arm64 dist`.
 
 CI ([`build.yml`](.github/workflows/build.yml)) builds all three targets for Apple Silicon and Intel on every push and pull request. [`release.yml`](.github/workflows/release.yml) publishes DMGs and plugin zips.
@@ -104,9 +126,9 @@ CI ([`build.yml`](.github/workflows/build.yml)) builds all three targets for App
 ## Architecture
 
 ```
-Host / audio device ──▶ AxiomAudioProcessor ──▶ output
-                          input trim → high-pass → preamp voice → Bass/Mid/Treble/Presence
-                          → cabinet → master → room reverb
+Host / audio device ──▶ AxiomAudioProcessor ──▶ AxiomDsp ──▶ stereo output
+   input select → trim → drive → [8× oversampled: boost → tube stages → tone stack
+   → power amp + sag → presence] → cabinet → master → chorus → delay → room
 
 AxiomAudioProcessorEditor ──▶ parameters (AudioProcessorValueTreeState)
         └─ Tone Match: worker thread → FFT analysis → suggestion → Apply tone
@@ -114,7 +136,10 @@ AxiomAudioProcessorEditor ──▶ parameters (AudioProcessorValueTreeState)
 
 | Path | What's there |
 |---|---|
-| [`Source/PluginProcessor.*`](Source/PluginProcessor.cpp) | Host parameters, amp DSP, cabinet filtering and room reverb. Real-time safe. |
+| [`Source/AxiomDsp.*`](Source/AxiomDsp.cpp) | The signal path: oversampled amp, cabinet, chorus, delay and room. Real-time safe. |
+| [`Source/Presets.h`](Source/Presets.h) | Factory tone presets. |
+| [`Source/PluginProcessor.*`](Source/PluginProcessor.cpp) | Host parameters, presets as programs and state. |
+| [`tools/render`](tools/render/Main.cpp) | `axiom-render`: offline level, balance, aliasing and sample-rate checks. |
 | [`Source/PluginEditor.*`](Source/PluginEditor.cpp) | Interface, reference-file chooser, analysis job and apply action. |
 | [`Source/ToneMatchAnalyzer.*`](Source/ToneMatchAnalyzer.cpp) | Local spectral-profile analysis of a reference clip. |
 | [`Source/DesignTokens.h`](Source/DesignTokens.h) | The interface palette. |

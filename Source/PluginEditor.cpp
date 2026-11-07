@@ -155,7 +155,7 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     setLookAndFeel (&lookAndFeel);
     setSize (1080, 820);
     setResizable (true, true);
-    setResizeLimits (960, 820, 1440, 1000);
+    setResizeLimits (1060, 820, 1440, 1000);
 
     wordmark.setText ("axiom", juce::dontSendNotification);
     wordmark.setFont (juce::Font (juce::FontOptions (29.0f, juce::Font::bold)));
@@ -189,6 +189,33 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     configureSlider (master, masterLabel, "MASTER");
     configureSlider (input, inputLabel, "INPUT TRIM");
     configureSlider (room, roomKnobLabel, "ROOM");
+
+    configureSlider (boost, boostLabel, "BOOST");
+    configureSlider (chorus, chorusLabel, "CHORUS");
+    configureSlider (delayMix, delayMixLabel, "DELAY");
+    configureSlider (delayTime, delayTimeLabel, "DELAY TIME");
+
+    configureSectionLabel (presetLabel, "TONE PRESET");
+    addAndMakeVisible (presetLabel);
+    for (int i = 0; i < AxiomAudioProcessor::numPresets; ++i)
+        preset.addItem (axiom::factoryPresets[(size_t) i].name, i + 1);
+    preset.setTextWhenNothingSelected ("Custom");
+    preset.setSelectedId (audioProcessor.presetModified.load() ? 0 : audioProcessor.getCurrentProgram() + 1, juce::dontSendNotification);
+    preset.setJustificationType (juce::Justification::centredLeft);
+    preset.setTooltip ("Load a starting tone. It sets the voice, gain, EQ and effects; every control stays adjustable.");
+    preset.onChange = [this]
+    {
+        if (preset.getSelectedId() > 0)
+            audioProcessor.setCurrentProgram (preset.getSelectedId() - 1);
+    };
+    addAndMakeVisible (preset);
+
+    configureSectionLabel (sourceLabel, "INPUT");
+    addAndMakeVisible (sourceLabel);
+    inputSource.addItemList ({ "Left", "Right", "Left + Right" }, 1);
+    inputSource.setJustificationType (juce::Justification::centredLeft);
+    inputSource.setTooltip ("Which input channel carries your guitar. The amp is mono and plays through both ears.");
+    addAndMakeVisible (inputSource);
 
     configureSectionLabel (voiceLabel, "AMP VOICE");
     addAndMakeVisible (voiceLabel);
@@ -244,6 +271,11 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     roomAttachment = std::make_unique<SliderAttachment> (state, "room", room);
     voiceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, "voice", voice);
     cabinetAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, "cabinet", cabinet);
+    boostAttachment = std::make_unique<SliderAttachment> (state, "boost", boost);
+    chorusAttachment = std::make_unique<SliderAttachment> (state, "chorus", chorus);
+    delayMixAttachment = std::make_unique<SliderAttachment> (state, "delayMix", delayMix);
+    delayTimeAttachment = std::make_unique<SliderAttachment> (state, "delayTime", delayTime);
+    sourceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, "inputSource", inputSource);
     startTimerHz (30);
 }
 
@@ -398,14 +430,24 @@ void AxiomAudioProcessorEditor::resized()
         sliders[i]->setBounds (x + 3, 215, controlWidth - 6, 202);
     }
 
-    voiceLabel.setBounds (58, 478, 170, 16);
-    voice.setBounds (58, 500, 218, 42);
-    inputLabel.setBounds (298, 478, 110, 16);
-    input.setBounds (297, 495, 112, 117);
-    roomKnobLabel.setBounds (421, 478, 100, 16);
-    room.setBounds (419, 495, 104, 117);
-    cabinet.setBounds (w - 317, 496, 252, 44);
-    cabinetCaption.setBounds (w - 306, 548, 234, 16);
+    presetLabel.setBounds (w - 560, 33, 200, 14);
+    preset.setBounds (w - 560, 49, 300, 36);
+
+    voiceLabel.setBounds (58, 474, 170, 14);
+    voice.setBounds (58, 491, 190, 34);
+    sourceLabel.setBounds (58, 538, 170, 14);
+    inputSource.setBounds (58, 555, 190, 34);
+
+    juce::Slider* extras[] = { &input, &boost, &chorus, &delayMix, &delayTime, &room };
+    juce::Label* extraLabels[] = { &inputLabel, &boostLabel, &chorusLabel, &delayMixLabel, &delayTimeLabel, &roomKnobLabel };
+    for (int i = 0; i < 6; ++i)
+    {
+        const int x = 268 + i * 90;
+        extraLabels[i]->setBounds (x, 474, 88, 14);
+        extras[i]->setBounds (x, 491, 88, 117);
+    }
+    cabinet.setBounds (w - 252, 496, 196, 44);
+    cabinetCaption.setBounds (w - 241, 548, 180, 16);
 
     toneMatchHeading.setBounds (58, 644, 220, 18);
     toneMatchDescription.setBounds (58, 667, 270, 44);
@@ -496,4 +538,10 @@ void AxiomAudioProcessorEditor::applyToneSuggestion()
                              juce::dontSendNotification);
 }
 
-void AxiomAudioProcessorEditor::timerCallback() { repaint(); }
+void AxiomAudioProcessorEditor::timerCallback()
+{
+    const int selected = audioProcessor.presetModified.load() ? 0 : audioProcessor.getCurrentProgram() + 1;
+    if (preset.getSelectedId() != selected)
+        preset.setSelectedId (selected, juce::dontSendNotification);
+    repaint();
+}

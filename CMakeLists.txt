@@ -37,6 +37,9 @@ target_sources(Axiom PRIVATE
     Source/PluginProcessor.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
+    Source/AxiomDsp.cpp
+    Source/AxiomDsp.h
+    Source/Presets.h
     Source/ToneMatchAnalyzer.cpp
     Source/ToneMatchAnalyzer.h
     Source/DesignTokens.h
@@ -57,3 +60,16 @@ target_link_libraries(Axiom PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+# Offline renderer: pushes a synthetic plucked-string signal through every preset, writes WAV files
+# and prints level, balance, aliasing and NaN checks. Configure with -DAXIOM_BUILD_TOOLS=ON.
+option(AXIOM_BUILD_TOOLS "Build developer tools (axiom-render)" OFF)
+if (AXIOM_BUILD_TOOLS)
+    juce_add_console_app(AxiomRender PRODUCT_NAME "axiom-render")
+    target_sources(AxiomRender PRIVATE tools/render/Main.cpp Source/AxiomDsp.cpp)
+    target_include_directories(AxiomRender PRIVATE Source)
+    target_compile_definitions(AxiomRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(AxiomRender PRIVATE
+        juce::juce_dsp juce::juce_audio_formats
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+endif()

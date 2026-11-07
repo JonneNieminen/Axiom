@@ -34,8 +34,11 @@ jobs:
           cmake -S . -B build -G "Unix Makefiles"
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          -DAXIOM_BUILD_TOOLS=ON
       - name: Build standalone app and plugins
-        run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU -j 4
+        run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU AxiomRender -j 4
+      - name: DSP checks
+        run: build/AxiomRender_artefacts/Release/AxiomRender
       - name: Ad-hoc sign bundles
         run: |
           for b in Standalone/Axiom.app VST3/Axiom.vst3 AU/Axiom.component; do

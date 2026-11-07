@@ -13,6 +13,11 @@ constexpr auto masterId = "master";
 constexpr auto roomId = "room";
 constexpr auto voiceId = "voice";
 constexpr auto cabinetId = "cabinet";
+constexpr auto sourceId = "inputSource";
+constexpr auto boostId = "boost";
+constexpr auto chorusId = "chorus";
+constexpr auto delayMixId = "delayMix";
+constexpr auto delayTimeId = "delayTime";
 
 juce::String formatValue (float value, const char* unit, int decimals)
 {
@@ -39,6 +44,22 @@ AxiomAudioProcessor::AxiomAudioProcessor()
                                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "AXIOM_STATE", createParameterLayout())
 {
+    for (auto* parameter : getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+            parameters.addParameterListener (withId->paramID, this);
+}
+
+AxiomAudioProcessor::~AxiomAudioProcessor()
+{
+    for (auto* parameter : getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+            parameters.removeParameterListener (withId->paramID, this);
+}
+
+void AxiomAudioProcessor::parameterChanged (const juce::String&, float)
+{
+    if (! applyingPreset)
+        presetModified.store (true);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createParameterLayout()
@@ -58,6 +79,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createP
     p.add (std::make_unique<Choice> (juce::ParameterID { voiceId, 1 }, "Voice",
                                      juce::StringArray { "Clean", "Classic", "Modern" }, 1));
     p.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { cabinetId, 1 }, "Cabinet", true));
+    p.add (std::make_unique<Choice> (juce::ParameterID { sourceId, 1 }, "Input Source",
+                                     juce::StringArray { "Left", "Right", "Left + Right" }, 0));
+    const auto percent = juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float v, int) { return formatValue (v, "%", 0); });
+    p.add (std::make_unique<Float> (juce::ParameterID { boostId, 1 }, "Boost", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f, percent));
+    p.add (std::make_unique<Float> (juce::ParameterID { chorusId, 1 }, "Chorus", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f, percent));
+    p.add (std::make_unique<Float> (juce::ParameterID { delayMixId, 1 }, "Delay", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f, percent));
+    p.add (std::make_unique<Float> (juce::ParameterID { delayTimeId, 1 }, "Delay Time", juce::NormalisableRange<float> (40.0f, 1000.0f, 1.0f, 0.5f), 380.0f,
+                                    juce::AudioParameterFloatAttributes().withLabel (" ms").withStringFromValueFunction ([] (float v, int) { return formatValue (v, " ms", 0); })));
     return p;
 }
 
@@ -70,177 +99,42 @@ bool AxiomAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 
 void AxiomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused (samplesPerBlock);
-    currentSampleRate = sampleRate;
-    const juce::dsp::ProcessSpec spec { sampleRate, 1, (juce::uint32) getTotalNumOutputChannels() };
-
-    for (auto& strip : strips)
-    {
-        strip.inputHighPass.prepare (spec);
-        strip.bass.prepare (spec);
-        strip.mid.prepare (spec);
-        strip.treble.prepare (spec);
-        strip.presence.prepare (spec);
-        strip.cabHighPass.prepare (spec);
-        strip.cabResonance.prepare (spec);
-        strip.cabLowPass.prepare (spec);
-        const auto makeIdentity = [] { return new juce::dsp::IIR::Coefficients<float> (1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f); };
-        strip.inputHighPass.coefficients = makeIdentity();
-        strip.bass.coefficients = makeIdentity();
-        strip.mid.coefficients = makeIdentity();
-        strip.treble.coefficients = makeIdentity();
-        strip.presence.coefficients = makeIdentity();
-        strip.cabHighPass.coefficients = makeIdentity();
-        strip.cabResonance.coefficients = makeIdentity();
-        strip.cabLowPass.coefficients = makeIdentity();
-        strip.inputHighPass.reset();
-        strip.bass.reset();
-        strip.mid.reset();
-        strip.treble.reset();
-        strip.presence.reset();
-        strip.cabHighPass.reset();
-        strip.cabResonance.reset();
-        strip.cabLowPass.reset();
-    }
-
-    reverb.reset();
-    reverb.setSampleRate (sampleRate);
-    inputGain.reset (sampleRate, 0.025);
-    ampGain.reset (sampleRate, 0.04);
-    masterGain.reset (sampleRate, 0.025);
-    roomMix.reset (sampleRate, 0.08);
-    lastBass = read (parameters, bassId);
-    lastMiddle = read (parameters, midId);
-    lastTreble = read (parameters, trebleId);
-    lastPresence = read (parameters, presenceId);
-    updateToneFilters (lastBass, lastMiddle, lastTreble, lastPresence);
+    dsp.prepare (sampleRate, samplesPerBlock);
+    setLatencySamples (dsp.getLatencySamples());
 }
 
-void AxiomAudioProcessor::updateToneFilters (float bassDb, float midDb, float trebleDb, float presenceDb)
+axiom::AxiomParams AxiomAudioProcessor::readParameters()
 {
-    const float nyquistSafe = (float) (currentSampleRate * 0.44);
-    using Coefficients = juce::dsp::IIR::ArrayCoefficients<float>;
-    const auto inputHighPass = Coefficients::makeHighPass (currentSampleRate, 72.0f, 0.707f);
-    const auto bassCoefficients = Coefficients::makeLowShelf (currentSampleRate, 115.0f, 0.707f, juce::Decibels::decibelsToGain (bassDb));
-    const auto midCoefficients = Coefficients::makePeakFilter (currentSampleRate, 720.0f, 0.85f, juce::Decibels::decibelsToGain (midDb));
-    const auto trebleCoefficients = Coefficients::makeHighShelf (currentSampleRate, 3400.0f, 0.707f, juce::Decibels::decibelsToGain (trebleDb));
-    const auto presenceCoefficients = Coefficients::makeHighShelf (currentSampleRate, 4600.0f, 0.707f, juce::Decibels::decibelsToGain (presenceDb));
-    const auto cabHighPass = Coefficients::makeHighPass (currentSampleRate, 78.0f, 0.707f);
-    const auto cabResonance = Coefficients::makePeakFilter (currentSampleRate, juce::jmin (2800.0f, nyquistSafe), 1.1f, juce::Decibels::decibelsToGain (2.0f));
-    const auto cabLowPass = Coefficients::makeLowPass (currentSampleRate, juce::jmin (6800.0f, nyquistSafe), 0.707f);
-    const auto set = [] (auto& filter, const auto& values) { *filter.coefficients = values; };
-    for (auto& strip : strips)
-    {
-        set (strip.inputHighPass, inputHighPass);
-        set (strip.bass, bassCoefficients);
-        set (strip.mid, midCoefficients);
-        set (strip.treble, trebleCoefficients);
-        set (strip.presence, presenceCoefficients);
-        set (strip.cabHighPass, cabHighPass);
-        set (strip.cabResonance, cabResonance);
-        set (strip.cabLowPass, cabLowPass);
-    }
+    axiom::AxiomParams p;
+    p.inputDb = read (parameters, inputId);
+    p.gain = read (parameters, gainId);
+    p.voice = juce::roundToInt (read (parameters, voiceId));
+    p.source = juce::roundToInt (read (parameters, sourceId));
+    p.bassDb = read (parameters, bassId);
+    p.midDb = read (parameters, midId);
+    p.trebleDb = read (parameters, trebleId);
+    p.presenceDb = read (parameters, presenceId);
+    p.masterDb = read (parameters, masterId);
+    p.room = read (parameters, roomId);
+    p.boost = read (parameters, boostId);
+    p.chorus = read (parameters, chorusId);
+    p.delayMix = read (parameters, delayMixId);
+    p.delayMs = read (parameters, delayTimeId);
+    p.cabinet = read (parameters, cabinetId) >= 0.5f;
+    return p;
 }
 
 void AxiomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    juce::ScopedNoDenormals noDenormals;
     const int channels = juce::jmin (buffer.getNumChannels(), 2);
     const int samples = buffer.getNumSamples();
+    if (channels == 0 || samples == 0)
+        return;
 
-    const float inputDb = read (parameters, inputId);
-    const float gain = read (parameters, gainId);
-    const int voice = juce::roundToInt (read (parameters, voiceId));
-    const float bassDb = read (parameters, bassId);
-    const float midDb = read (parameters, midId);
-    const float trebleDb = read (parameters, trebleId);
-    const float presenceDb = read (parameters, presenceId);
-    const float masterDb = read (parameters, masterId);
-    const float room = read (parameters, roomId) * 0.01f;
-    const bool cabinetEnabled = read (parameters, cabinetId) >= 0.5f;
-
-    const float voiceDrive = voice == 0 ? 0.28f : (voice == 1 ? 0.56f : 0.88f);
-    const float drive = 1.0f + gain * voiceDrive;
-    const float stageOutput = voice == 0 ? 1.15f : (voice == 1 ? 0.88f : 0.72f);
-    inputGain.setTargetValue (juce::Decibels::decibelsToGain (inputDb));
-    ampGain.setTargetValue (drive);
-    masterGain.setTargetValue (juce::Decibels::decibelsToGain (masterDb) * stageOutput);
-    roomMix.setTargetValue (room);
-
-    const auto differs = [] (float a, float b) { return ! juce::exactlyEqual (a, b); };
-    if (differs (bassDb, lastBass) || differs (midDb, lastMiddle) || differs (trebleDb, lastTreble) || differs (presenceDb, lastPresence))
-    {
-        updateToneFilters (bassDb, midDb, trebleDb, presenceDb);
-        lastBass = bassDb;
-        lastMiddle = midDb;
-        lastTreble = trebleDb;
-        lastPresence = presenceDb;
-    }
-
-    // Single-input audio interfaces leave the right input silent in the standalone app;
-    // feed the guitar to both sides so the amp is centred instead of left-only.
-    if (wrapperType == wrapperType_Standalone && channels == 2
-        && buffer.getMagnitude (1, 0, samples) == 0.0f && buffer.getMagnitude (0, 0, samples) > 0.0f)
-        buffer.copyFrom (1, 0, buffer, 0, 0, samples);
-
-    for (int i = 0; i < samples; ++i)
-    {
-        const float in = inputGain.getNextValue();
-        const float driveNow = ampGain.getNextValue();
-        const float out = masterGain.getNextValue();
-        for (int ch = 0; ch < channels; ++ch)
-        {
-            auto& s = strips[(size_t) ch];
-            float x = buffer.getSample (ch, i) * in;
-            x = s.inputHighPass.processSample (x);
-            x *= driveNow;
-
-            if (voice == 0)
-            {
-                x = std::tanh (x * 0.92f);
-            }
-            else if (voice == 1)
-            {
-                x = std::tanh (x * 1.15f);
-                x = std::tanh (x * 1.18f);
-            }
-            else
-            {
-                x = std::tanh (x * 1.35f);
-                x = std::tanh (x * 1.30f);
-                x = std::tanh (x * 1.18f);
-                x = 0.92f * x + 0.08f * std::tanh (x * 2.4f);
-            }
-
-            x = s.bass.processSample (x);
-            x = s.mid.processSample (x);
-            x = s.treble.processSample (x);
-            x = s.presence.processSample (x);
-            if (cabinetEnabled)
-            {
-                x = s.cabHighPass.processSample (x);
-                x = s.cabResonance.processSample (x);
-                x = s.cabLowPass.processSample (x);
-            }
-            buffer.setSample (ch, i, x * out);
-        }
-    }
-
-    const float smoothedRoom = roomMix.skip (samples);
-    if (channels > 0 && smoothedRoom > 0.0001f)
-    {
-        juce::Reverb::Parameters rp;
-        rp.roomSize = 0.25f + smoothedRoom * 0.65f;
-        rp.damping = 0.52f;
-        rp.wetLevel = smoothedRoom * 0.28f;
-        rp.dryLevel = 1.0f;
-        rp.width = 1.0f;
-        reverb.setParameters (rp);
-        if (channels == 2)
-            reverb.processStereo (buffer.getWritePointer (0), buffer.getWritePointer (1), samples);
-        else
-            reverb.processMono (buffer.getWritePointer (0), samples);
-    }
+    const auto params = readParameters();
+    const float* inL = buffer.getReadPointer (0);
+    const float* inR = channels > 1 ? buffer.getReadPointer (1) : nullptr;
+    dsp.process (inL, inR, buffer.getWritePointer (0), channels > 1 ? buffer.getWritePointer (1) : nullptr, samples, params);
 
     float peak = 0.0f;
     for (int ch = 0; ch < channels; ++ch)
@@ -248,9 +142,46 @@ void AxiomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     outputPeak.store (juce::jmax (peak, outputPeak.load (std::memory_order_relaxed) * 0.88f), std::memory_order_relaxed);
 }
 
+void AxiomAudioProcessor::setCurrentProgram (int index)
+{
+    index = juce::jlimit (0, numPresets - 1, index);
+    applyingPreset = true;
+    const auto& p = axiom::factoryPresets[(size_t) index].params;
+    const auto set = [this] (const char* id, float value)
+    {
+        if (auto* parameter = parameters.getParameter (id))
+            parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+    };
+    set (inputId, p.inputDb);
+    set (gainId, p.gain);
+    set (bassId, p.bassDb);
+    set (midId, p.midDb);
+    set (trebleId, p.trebleDb);
+    set (presenceId, p.presenceDb);
+    set (masterId, p.masterDb);
+    set (roomId, p.room);
+    set (voiceId, (float) p.voice);
+    set (cabinetId, p.cabinet ? 1.0f : 0.0f);
+    set (boostId, p.boost);
+    set (chorusId, p.chorus);
+    set (delayMixId, p.delayMix);
+    set (delayTimeId, p.delayMs);
+    applyingPreset = false;
+    currentPreset.store (index);
+    presetModified.store (false);
+}
+
+const juce::String AxiomAudioProcessor::getProgramName (int index)
+{
+    return juce::isPositiveAndBelow (index, numPresets) ? juce::String (axiom::factoryPresets[(size_t) index].name) : juce::String();
+}
+
 void AxiomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    std::unique_ptr<juce::XmlElement> xml (parameters.copyState().createXml());
+    auto state = parameters.copyState();
+    state.setProperty ("preset", currentPreset.load(), nullptr);
+    state.setProperty ("presetModified", presetModified.load(), nullptr);
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, dest);
 }
 
@@ -258,7 +189,14 @@ void AxiomAudioProcessor::setStateInformation (const void* data, int size)
 {
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, size));
     if (xml != nullptr && xml->hasTagName (parameters.state.getType()))
-        parameters.replaceState (juce::ValueTree::fromXml (*xml));
+    {
+        const auto state = juce::ValueTree::fromXml (*xml);
+        currentPreset.store (juce::jlimit (0, numPresets - 1, (int) state.getProperty ("preset", 0)));
+        applyingPreset = true;
+        parameters.replaceState (state);
+        applyingPreset = false;
+        presetModified.store ((bool) state.getProperty ("presetModified", ! state.hasProperty ("preset")));
+    }
 }
 
 juce::AudioProcessorEditor* AxiomAudioProcessor::createEditor() { return new AxiomAudioProcessorEditor (*this); }

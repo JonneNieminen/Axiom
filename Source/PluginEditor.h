@@ -45,10 +45,11 @@ private:
     AxiomAudioProcessor& audioProcessor;
     AxiomLookAndFeel lookAndFeel;
     juce::Label wordmark, descriptor, ampHeading, ampSubheading, voiceLabel;
+    juce::Label presetLabel, sourceLabel;
     juce::Label cabinetCaption, toneMatchHeading, toneMatchDescription, referenceStatus;
-    juce::Slider gain, bass, middle, treble, presence, master, input, room;
-    juce::Label gainLabel, bassLabel, middleLabel, trebleLabel, presenceLabel, masterLabel, inputLabel, roomKnobLabel;
-    juce::ComboBox voice;
+    juce::Slider gain, bass, middle, treble, presence, master, input, room, boost, chorus, delayMix, delayTime;
+    juce::Label gainLabel, bassLabel, middleLabel, trebleLabel, presenceLabel, masterLabel, inputLabel, roomKnobLabel, boostLabel, chorusLabel, delayMixLabel, delayTimeLabel;
+    juce::ComboBox voice, preset, inputSource;
     juce::ToggleButton cabinet;
     juce::TextButton chooseReferenceButton { "Choose audio" }, applyToneButton { "Apply tone" };
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -58,6 +59,8 @@ private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     std::unique_ptr<SliderAttachment> gainAttachment, bassAttachment, middleAttachment, trebleAttachment;
     std::unique_ptr<SliderAttachment> presenceAttachment, masterAttachment, inputAttachment, roomAttachment;
+    std::unique_ptr<SliderAttachment> boostAttachment, chorusAttachment, delayMixAttachment, delayTimeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> voiceAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> cabinetAttachment;
 
