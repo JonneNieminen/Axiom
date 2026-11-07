@@ -1,0 +1,5 @@
+---
+description: Shared Axiom JUCE plugin development guidance
+alwaysApply: true
+---
+Follow the repository's [AGENTS.md](../../AGENTS.md) for architecture, real-time DSP safety, Tone Match behavior, parameter compatibility, build steps, and design rules. Do not duplicate project guidance in this rule.

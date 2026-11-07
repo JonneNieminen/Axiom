@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  pull_request:
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-26,       arch: arm64 }
+          - { os: macos-26-intel, arch: x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch JUCE
+        run: git clone --depth 1 --branch 9.0.5 https://github.com/juce-framework/JUCE.git third_party/JUCE
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G "Unix Makefiles"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+      - name: Build standalone app and plugins
+        run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU -j 4
+      - name: Ad-hoc sign bundles
+        run: |
+          for b in Standalone/Axiom.app VST3/Axiom.vst3 AU/Axiom.component; do
+            codesign --force --deep --sign - "build/Axiom_artefacts/Release/$b"
+          done
+      - name: Verify desktop app and plugin bundles
+        run: |
+          test -d build/Axiom_artefacts/Release/Standalone/Axiom.app
+          test -d build/Axiom_artefacts/Release/VST3/Axiom.vst3
+          test -d build/Axiom_artefacts/Release/AU/Axiom.component
+          codesign --verify --deep --strict build/Axiom_artefacts/Release/Standalone/Axiom.app
+          codesign --verify --deep --strict build/Axiom_artefacts/Release/VST3/Axiom.vst3
+          codesign --verify --deep --strict build/Axiom_artefacts/Release/AU/Axiom.component
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Axiom-macos-${{ matrix.arch }}
+          path: |
+            build/Axiom_artefacts/Release/Standalone/Axiom.app
+            build/Axiom_artefacts/Release/VST3/Axiom.vst3
+            build/Axiom_artefacts/Release/AU/Axiom.component
+          if-no-files-found: error
+          retention-days: 14
+
+  result:
+    name: Build result
+    if: always()
+    needs: macos
+    runs-on: ubuntu-26.04
+    steps:
+      - name: All builds succeeded
+        env:
+          RESULT: ${{ needs.macos.result }}
+        run: test "$RESULT" = success

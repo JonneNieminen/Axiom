@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How Tone Match works
+    url: https://github.com/JonneNieminen/Axiom/blob/main/docs/TONE_MATCH.md
+    about: What the reference analysis does and does not do.

@@ -1,0 +1,27 @@
+Axiom {{VERSION}} for macOS ({{ARCH}})
+====================================
+
+1. Drag Axiom onto the Applications folder in this window.
+
+2. This build isn't notarized by Apple yet, so macOS blocks the first launch
+   ("Axiom is damaged" or "can't be opened"). Open Terminal, paste this line
+   and press Return:
+
+   xattr -dr com.apple.quarantine /Applications/Axiom.app
+
+3. Open Axiom from Applications or Launchpad. You only need step 2 once.
+   Allow microphone access when macOS asks: that is your audio interface input.
+
+What the command does: it removes the "downloaded from the internet" flag that
+macOS puts on files from a browser, so Gatekeeper stops blocking this copy.
+It changes nothing else.
+
+Prefer not to use Terminal? Open Axiom once, then go to System Settings >
+Privacy & Security, scroll down and click "Open Anyway" next to Axiom.
+
+Plugins: the release also has a plugins zip. Copy Axiom.vst3 to
+~/Library/Audio/Plug-Ins/VST3 or Axiom.component to
+~/Library/Audio/Plug-Ins/Components, and run the same xattr command on the copies:
+
+   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Axiom.vst3
+   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Axiom.component

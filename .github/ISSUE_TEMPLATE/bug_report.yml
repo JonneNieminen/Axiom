@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in Axiom doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a problem. Please don't attach copyrighted audio; describe the file instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what did you hear or see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the standalone app, input device "Scarlett Solo"
+        2. Voice: Modern, Gain 8
+        3. …
+  - type: dropdown
+    id: format
+    attributes:
+      label: How are you running Axiom?
+      options: [Standalone app, VST3, Audio Unit]
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: DAW and version
+      description: Leave empty for the standalone app.
+      placeholder: Logic Pro 11, Reaper 7
+  - type: input
+    id: version
+    attributes:
+      label: Axiom version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS version
+      placeholder: MacBook Pro M1 Pro, macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: audio
+    attributes:
+      label: Audio interface, sample rate and buffer size
+      placeholder: Focusrite Scarlett Solo, 48 kHz, 128 samples
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message or logs
+      render: text

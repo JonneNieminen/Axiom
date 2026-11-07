@@ -1,0 +1,10 @@
+/build/*
+!/build/macos/
+/cmake-build-*/
+/.cache/
+/third_party/JUCE/
+/release/
+.DS_Store
+*.user
+*.suo
+*.log
