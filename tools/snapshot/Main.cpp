@@ -1,6 +1,6 @@
 // axiom-snapshot: renders the plugin editor to a PNG without a host or a window, for the
 // README screenshot and as a smoke test that the editor builds its UI without crashing.
-// Usage: axiom-snapshot <output.png> [preset-index] [tuner|save]
+// Usage: axiom-snapshot <output.png> [preset-index] [tuner] [save] [light]
 //        axiom-snapshot --check   (user presets and session state)
 // With "tuner" the tuner is switched on and fed a slightly sharp A string; with "save" the
 // Save tone prompt is open.
@@ -69,6 +69,17 @@ int runChecks()
     fromOld.setStateInformation (oldState.getData(), (int) oldState.getSize());
     expect (value (fromOld, "gate") <= axiom::gateOffDb, "old sessions load with the gate off");
 
+    // The theme travels with the session; sessions from before it existed open dark.
+    processor.darkTheme.store (false);
+    juce::MemoryBlock themed;
+    processor.getStateInformation (themed);
+    AxiomAudioProcessor lightRestored;
+    lightRestored.setStateInformation (themed.getData(), (int) themed.getSize());
+    expect (! lightRestored.darkTheme.load(), "a session remembers the light theme");
+    AxiomAudioProcessor darkDefault;
+    darkDefault.setStateInformation (oldState.getData(), (int) oldState.getSize());
+    expect (darkDefault.darkTheme.load(), "old sessions open dark");
+
     folder.getFile().deleteRecursively();
     std::printf ("\n%s\n", failures == 0 ? "All checks passed" : "CHECKS FAILED");
     return failures == 0 ? 0 : 1;
@@ -91,13 +102,22 @@ int main (int argc, char** argv)
 
     juce::ScopedJuceInitialiser_GUI gui;
     AxiomAudioProcessor processor;
+    const auto flag = [&] (const char* name)
+    {
+        for (int i = 3; i < argc; ++i)
+            if (juce::String (argv[i]) == name)
+                return true;
+        return false;
+    };
     if (argc > 2)
         processor.setCurrentProgram (juce::String (argv[2]).getIntValue());
+    if (flag ("light"))
+        processor.darkTheme.store (false);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
-    editor->setSize (1080, 820);
+    editor->setSize (AxiomAudioProcessorEditor::defaultWidth, AxiomAudioProcessorEditor::defaultHeight);
 
-    if (argc > 3 && juce::String (argv[3]) == "tuner")
+    if (flag ("tuner"))
     {
         processor.tunerActive.store (true);
         processor.prepareToPlay (48000.0, 512);
@@ -117,7 +137,7 @@ int main (int argc, char** argv)
             if (auto* tuner = dynamic_cast<AxiomTunerDisplay*> (child))
                 tuner->update();
     }
-    if (argc > 3 && juce::String (argv[3]) == "save")
+    if (flag ("save"))
         if (auto* menu = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("preset")))
             menu->setSelectedId (900, juce::sendNotificationSync);
 

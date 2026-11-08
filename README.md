@@ -11,20 +11,22 @@ Shape your sound by hand, or analyze a short reference clip and start from a sug
 Everything runs locally.
 
 [![Build](https://github.com/JonneNieminen/Axiom/actions/workflows/build.yml/badge.svg)](https://github.com/JonneNieminen/Axiom/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/JonneNieminen/Axiom?filter=v*&label=release&color=FFC857&labelColor=232850)](https://github.com/JonneNieminen/Axiom/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/JonneNieminen/Axiom?color=FFC857&labelColor=232850)](LICENSE)
-![Platform](https://img.shields.io/badge/macOS-Apple%20Silicon%20·%20Intel-232850?logo=apple&logoColor=F4EFE2)
+[![Release](https://img.shields.io/github/v/release/JonneNieminen/Axiom?filter=v*&label=release&color=F08A3C&labelColor=1E1B18)](https://github.com/JonneNieminen/Axiom/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/JonneNieminen/Axiom?color=F08A3C&labelColor=1E1B18)](LICENSE)
+![Platform](https://img.shields.io/badge/macOS-Apple%20Silicon%20·%20Intel-1E1B18?logo=apple&logoColor=F2ECE3)
 <br/>
 ![Top language](https://img.shields.io/github/languages/top/JonneNieminen/Axiom?color=f34b7d)
 ![Languages](https://img.shields.io/github/languages/count/JonneNieminen/Axiom)
 ![Code size](https://img.shields.io/github/languages/code-size/JonneNieminen/Axiom)
-[![JUCE](https://img.shields.io/badge/JUCE-9-232850)](https://juce.com)
+[![JUCE](https://img.shields.io/badge/JUCE-9-1E1B18)](https://juce.com)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)](https://isocpp.org)
-![Formats](https://img.shields.io/badge/Formats-Standalone%20·%20VST3%20·%20AU-FFC857?labelColor=232850)
+![Formats](https://img.shields.io/badge/Formats-Standalone%20·%20VST3%20·%20AU-F08A3C?labelColor=1E1B18)
 
 <br/>
 
-<img src="docs/screenshots/amp.png" alt="Axiom guitar amplifier interface" width="880" />
+<img src="docs/screenshots/axiom-dark.png" alt="Axiom guitar amplifier interface, dark" width="880" />
+
+<img src="docs/screenshots/axiom-light.png" alt="Axiom guitar amplifier interface, light" width="880" />
 
 </div>
 
@@ -37,7 +39,8 @@ Everything runs locally.
 - **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp. Tone knobs glide instead of stepping, so automating them never zips.
 - **Noise gate** in front of the amp that silences hum and hiss between notes without chopping decaying notes. The high-gain presets turn it on.
 - **Input and output meters**, with a marked sweet spot for setting Input trim.
-- **Tuner** in the header: click it, play a string, and it shows the note and how many cents you are off. The output mutes while you tune.
+- **Dark and light interface** in the Ember palette; each amp voice has its own colour. The theme is saved with your session.
+- **Tuner** in the sidebar: click it, play a string, and it shows the note and how many cents you are off. The output mutes while you tune.
 - **Built-in cabinet**: a 2×12-style speaker response you can switch off.
 - **Effects**: stereo chorus, a darkening stereo delay and a small room reverb.
 - **Tone Match**: analyze a short reference recording and apply a suggested voice, gain and EQ. The file never leaves your computer.
@@ -102,7 +105,7 @@ Hover any control for a short explanation, and double-click a knob to reset it. 
 
 ### Tune up
 
-Click **Tuner** in the header and play one open string. It shows the nearest note (A4 = 440 Hz) and a needle that turns amber within 3 cents. The output is muted while the tuner is on; click it again to play.
+Click **Tuner** in the sidebar and play one open string. It shows the nearest note (A4 = 440 Hz) and a needle that turns green within 3 cents. The output is muted while the tuner is on; click it again to play.
 
 ### Match a reference
 
@@ -130,7 +133,7 @@ cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_
 
 Products appear under `build/Axiom_artefacts/Release/`. Use `x86_64` for Intel or `arm64;x86_64` for a universal binary, add `-DJUCE_DIR=/path/to/JUCE` if JUCE lives elsewhere, or use `-G Xcode` to generate an Xcode project. Open the folder in VS Code with the recommended CMake Tools extension to build from the editor.
 
-Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/amp.png` renders the interface to a PNG without a host (add a preset number, and `tuner` to show the tuner); it is how the README screenshot is made. `AxiomSnapshot --check` tests user presets and session state.
+Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/axiom-dark.png 1` renders the interface to a PNG without a host (add a preset number, then `tuner`, `save` or `light`); it is how the README screenshots are made. `AxiomMatch` compares Axiom with reference recordings and, on your own machine, any installed Audio Unit you own, as a measuring yardstick (`AxiomMatch analyze|render|au|diff`). `AxiomSnapshot --check` tests user presets and session state.
 
 Build the drag-to-install DMG with `build/macos/make-dmg.sh build/Axiom_artefacts/Release/Standalone/Axiom.app 1.0.0 arm64 dist`.
 
@@ -155,7 +158,8 @@ AxiomAudioProcessorEditor ──▶ parameters (AudioProcessorValueTreeState)
 | [`tools/render`](tools/render/Main.cpp) | `axiom-render`: offline level, balance, aliasing and sample-rate checks. |
 | [`Source/PluginEditor.*`](Source/PluginEditor.cpp) | Interface, reference-file chooser, analysis job and apply action. |
 | [`Source/ToneMatchAnalyzer.*`](Source/ToneMatchAnalyzer.cpp) | Local spectral-profile analysis of a reference clip. |
-| [`Source/DesignTokens.h`](Source/DesignTokens.h) | The interface palette. |
+| [`Source/DesignTokens.h`](Source/DesignTokens.h) | The Ember palette (dark and light) and the logo geometry. |
+| [`design/`](design) | Logo masters (`make.py`) and the palette as CSS. |
 | [`build/macos/`](build/macos) | DMG packaging script and install notes. |
 | [`assets/`](assets) · [`docs/`](docs) | Logo marks, screenshots, design notes and Tone Match behavior. |
 

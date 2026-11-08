@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="660" height="156" viewBox="0 0 660 156" fill="none">
-  <rect x="8" y="8" width="140" height="140" rx="34" fill="#232850"/>
-  <rect x="9" y="9" width="138" height="138" rx="33" stroke="#4A5190" stroke-opacity=".52" stroke-width="2"/>
-  <circle cx="78" cy="78" r="45" stroke="#4A5190" stroke-opacity=".62" stroke-width="5"/>
-  <path d="m49 107 29-60 29 60M62 85h32" stroke="#F4EFE2" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="180" y="86" fill="#F4EFE2" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="58" font-weight="650" letter-spacing="-2">axiom</text>
-  <text x="183" y="122" fill="#B9BCD9" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="14" font-weight="600" letter-spacing="2.2">GUITAR AMPLIFIER</text>
-</svg>

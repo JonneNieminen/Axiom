@@ -326,6 +326,7 @@ void AxiomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("preset", currentPreset.load(), nullptr);
     state.setProperty ("presetModified", presetModified.load(), nullptr);
     state.setProperty ("userPreset", getUserPresetName(), nullptr);
+    state.setProperty ("theme", darkTheme.load() ? "dark" : "light", nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, dest);
 }
@@ -342,6 +343,7 @@ void AxiomAudioProcessor::setStateInformation (const void* data, int size)
         applyingPreset = false;
         presetModified.store ((bool) state.getProperty ("presetModified", ! state.hasProperty ("preset")));
         setUserPresetName (state.getProperty ("userPreset", juce::String()).toString());
+        darkTheme.store (state.getProperty ("theme", "dark").toString() != "light");
     }
 }
 

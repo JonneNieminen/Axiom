@@ -114,13 +114,13 @@ const std::array<VoiceConfig, 3> voices {{
       { 40.0, 40.0, 40.0 }, { 12000.0, 12000.0, 12000.0 },
       110.0, 480.0, 0.7, 3200.0, 5200.0, 0.55, 0.25, -0.5 },
     // Classic: plexi-style crunch that cleans up with the guitar volume
-    { 8.0, 42.0, 2, 85.0, 2400.0, 3.0, { 0.0, 6.0, 0.0 }, { 0.16, 0.10, 0.0 },
-      { 70.0, 120.0, 120.0 }, { 8500.0, 6200.0, 6200.0 },
+    { 8.0, 42.0, 2, 65.0, 2400.0, 3.0, { 0.0, 6.0, 0.0 }, { 0.16, 0.10, 0.0 },
+      { 50.0, 85.0, 85.0 }, { 8500.0, 6800.0, 6800.0 },
       100.0, 650.0, 0.8, 2600.0, 4300.0, 0.9, 0.32, -10.0 },
     // Modern: tight, hot-rodded high gain
-    { 10.0, 46.0, 3, 130.0, 2800.0, 2.0, { 0.0, 6.0, 4.0 }, { 0.14, 0.10, 0.06 },
-      { 90.0, 150.0, 240.0 }, { 7800.0, 6000.0, 4800.0 },
-      115.0, 720.0, 1.0, 2800.0, 4000.0, 1.1, 0.20, -14.5 },
+    { 10.0, 46.0, 3, 75.0, 2800.0, 2.0, { 0.0, 6.0, 4.0 }, { 0.14, 0.10, 0.06 },
+      { 45.0, 70.0, 100.0 }, { 7800.0, 6800.0, 6000.0 },
+      115.0, 720.0, 1.0, 2800.0, 4000.0, 0.85, 0.12, -17.0 },
 }};
 
 double triode (double x, double bias)
@@ -288,7 +288,7 @@ struct AxiomDsp::Impl
     double eqCoef = 0.0;
 
     // Base-rate cabinet / fizz filter
-    std::array<Biquad, 8> cab;
+    std::array<Biquad, 10> cab;
     int cabCount = 0;
 
     Modulation mod;
@@ -390,14 +390,15 @@ struct AxiomDsp::Impl
         const auto add = [this] (const Coeffs& c) { cab[(size_t) cabCount++].set (c); };
         if (p.cabinet)
         {
-            add (highPass (fs, 78.0, 0.72));
-            add (peak (fs, 105.0, 1.3, 3.0));
-            add (peak (fs, 420.0, 0.9, -2.0));
-            add (peak (fs, 2600.0, 1.2, 4.0));
-            add (peak (fs, 3900.0, 2.0, 1.5));
-            add (lowPass (fs, 5000.0, 0.541));
-            add (lowPass (fs, 5000.0, 1.307));
-            add (peak (fs, 7200.0, 3.0, -6.0));
+            add (highPass (fs, 64.0, 0.72));
+            add (peak (fs, 100.0, 0.8, 12.0));
+            add (peak (fs, 420.0, 0.9, -3.0));
+            add (peak (fs, 640.0, 1.2, -3.0));
+            add (peak (fs, 2600.0, 1.2, 3.0));
+            add (peak (fs, 4200.0, 1.6, 3.0));
+            add (lowPass (fs, 6000.0, 0.541));
+            add (lowPass (fs, 6000.0, 1.307));
+            add (peak (fs, 7800.0, 3.0, -4.0));
         }
         else
         {

@@ -27,7 +27,7 @@ CI builds all three targets for Apple Silicon and Intel.
 - **Stable parameters.** Preserve parameter IDs and their meanings; DAW sessions store them. Read automatable controls through `AudioProcessorValueTreeState` and smooth audible changes.
 - **Explicit channel and sample-rate handling.** Mono and stereo, any sample rate.
 - **Tone Match off the audio thread.** Decoding and analysis run on the worker thread; apply suggestions through host-notifying parameter calls.
-- **Design tokens only.** Colors live in `Source/DesignTokens.h`. Keep `docs/DESIGN.md`, the SVG assets and the README screenshot aligned with the interface.
+- **Design tokens only.** Colors live in `Source/DesignTokens.h`. Keep `docs/DESIGN.md`, the logo (`design/logo/make.py`) and the README screenshots aligned with the interface.
 - **Original artwork.** Lumio is a visual reference, not an asset source.
 - **Accurate docs.** Keep labels, failure states and supported file formats truthful.
 

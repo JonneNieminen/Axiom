@@ -84,4 +84,12 @@ if (AXIOM_BUILD_TOOLS)
     target_link_libraries(AxiomSnapshot PRIVATE
         juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+    # Compares Axiom with reference recordings and installed Audio Units (measurement only).
+    juce_add_console_app(AxiomMatch PRODUCT_NAME "axiom-match")
+    target_sources(AxiomMatch PRIVATE tools/match/Main.cpp Source/AxiomDsp.cpp)
+    target_include_directories(AxiomMatch PRIVATE Source)
+    target_compile_definitions(AxiomMatch PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_AU=1)
+    target_link_libraries(AxiomMatch PRIVATE
+        juce::juce_audio_utils juce::juce_dsp
+        PUBLIC juce::juce_recommended_config_flags)
 endif()

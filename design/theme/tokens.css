@@ -1,0 +1,46 @@
+/* Axiom "Ember" tokens. Source of truth for colours is Source/DesignTokens.h; keep both in step. */
+:root,
+:root[data-theme="dark"] {
+  --bg: #171513;
+  --sidebar: #1e1b18;
+  --surface: #26221e;
+  --elevated: #302b26;
+  --pressed: #3a342e;
+  --border: rgb(255 255 255 / 0.10);
+  --border-strong: rgb(255 255 255 / 0.18);
+  --text: #f2ece3;
+  --muted: #a0978b;
+  --faint: #6f675d;
+  --accent: #f08a3c;
+  --accent-hover: #f59a55;
+  --accent-text: #1a1008;
+  --accent-soft: rgb(240 138 60 / 0.18);
+  --voice-clean: #5bb5a6;
+  --voice-classic: #f2b84b;
+  --voice-modern: #ee6a4d;
+  --danger: #e5786a;
+  --success: #7bc48f;
+  --tile: #1f1a16;
+}
+:root[data-theme="light"] {
+  --bg: #f7f3ec;
+  --sidebar: #eee8de;
+  --surface: #ffffff;
+  --elevated: #f2ece2;
+  --pressed: #e9e1d5;
+  --border: rgb(0 0 0 / 0.09);
+  --border-strong: rgb(0 0 0 / 0.16);
+  --text: #231f1b;
+  --muted: #6f675d;
+  --faint: #a59c90;
+  --accent: #d4611a;
+  --accent-hover: #c45612;
+  --accent-text: #ffffff;
+  --accent-soft: rgb(212 97 26 / 0.12);
+  --voice-clean: #2f8f80;
+  --voice-classic: #b9801c;
+  --voice-modern: #c8472e;
+  --danger: #c4473a;
+  --success: #2f9663;
+  --tile: #1f1a16;
+}

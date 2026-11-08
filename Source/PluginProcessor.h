@@ -36,6 +36,8 @@ public:
     std::atomic<float> outputPeak { 0.0f };
     /** Peak of the guitar input after Input trim, i.e. what hits the preamp. */
     std::atomic<float> inputPeak { 0.0f };
+    /** Interface theme, saved with the session (not a parameter, so it never touches automation). */
+    std::atomic<bool> darkTheme { true };
     /** True once any control differs from the loaded preset. */
     std::atomic<bool> presetModified { false };
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
