@@ -22,10 +22,14 @@ struct AxiomParams
     float delayMix = 0.0f;  // %
     float delayMs = 380.0f;
     bool cabinet = true;
+    float gateDb = -80.0f;  // noise gate threshold; at or below gateOffDb the gate is off
 };
 
+/** Gate thresholds at or below this are treated as "Off". */
+constexpr float gateOffDb = -79.5f;
+
 /**
-    Guitar amp signal path: mono input -> boost -> oversampled tube-style preamp
+    Guitar amp signal path: mono input -> noise gate -> boost -> oversampled tube-style preamp
     -> tone stack -> power amp with sag -> cabinet -> chorus / delay -> stereo room.
 
     The amp is mono, as a real one is: the selected input is processed once and

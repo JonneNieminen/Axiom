@@ -137,12 +137,56 @@ float softLimit (float x)
     return std::copysign (knee + (1.0f - knee) * std::tanh ((a - knee) / (1.0f - knee)), x);
 }
 
+/** Noise gate keyed on the guitar input, like a pedal in front of the amp. A peak detector
+    with hysteresis and a hold time decides open or closed; the gain itself moves smoothly, so
+    a pick attack opens it in about a millisecond and decaying notes fade instead of chopping. */
+struct NoiseGate
+{
+    double env = 0.0, gain = 1.0, envRelease = 0.0, attack = 0.0, release = 0.0;
+    int holdSamples = 0, hold = 0;
+    bool open = true;
+
+    void prepare (double fs)
+    {
+        envRelease = 1.0 - std::exp (-1.0 / (0.012 * fs));
+        attack = 1.0 - std::exp (-1.0 / (0.0006 * fs));
+        release = 1.0 - std::exp (-1.0 / (0.06 * fs));
+        holdSamples = (int) std::lround (0.05 * fs);
+        reset();
+    }
+
+    void reset() { env = 0.0; gain = 1.0; hold = 0; open = true; }
+
+    /** Gain for one input sample. openLevel <= 0 bypasses the gate. */
+    double process (double x, double openLevel)
+    {
+        const double a = std::abs (x);
+        env = a > env ? a : env + (a - env) * envRelease;
+        if (openLevel <= 0.0 || env > openLevel)
+        {
+            open = true;
+            hold = holdSamples;
+        }
+        else if (open)
+        {
+            if (hold > 0)
+                --hold;
+            else if (env < openLevel * 0.5)  // 6 dB hysteresis
+                open = false;
+        }
+        const double target = open ? 1.0 : 0.0;
+        gain += (target - gain) * (target > gain ? attack : release);
+        return gain;
+    }
+};
+
 /** Interpolated circular delay line. */
 struct Line
 {
     std::vector<float> buf;
     int write = 0;
     void init (int size) { buf.assign ((size_t) size, 0.0f); write = 0; }
+    void clear() { std::fill (buf.begin(), buf.end(), 0.0f); write = 0; }
     void push (float v) { buf[(size_t) write] = v; if (++write >= (int) buf.size()) write = 0; }
     float read (double delay) const
     {
@@ -174,6 +218,13 @@ struct Modulation
         chorusMix.setCurrentAndTargetValue (0.0);
         delayMix.setCurrentAndTargetValue (0.0);
         delayTime.setCurrentAndTargetValue (0.38 * fs);
+        phase = lp = 0.0;
+    }
+
+    void reset()
+    {
+        chorus.clear();
+        delay.clear();
         phase = lp = 0.0;
     }
 
@@ -219,6 +270,9 @@ struct AxiomDsp::Impl
     std::vector<float> mono, left, right;
     juce::SmoothedValue<float> drive, master, room;
 
+    NoiseGate gate;
+    double gateOpenLevel = 0.0, inputGain = 1.0;
+
     // Oversampled section
     OnePole preHp, boostHp, boostLp;
     Biquad emph, bass, mid, treble, presence;
@@ -228,12 +282,18 @@ struct AxiomDsp::Impl
     double powerDrive = 1.0, sag = 0.0, outGain = 1.0, sagEnv = 0.0, sagAttack = 0.0, sagRelease = 0.0;
     double boostTarget = 0.0, boostNow = 0.0, boostCoef = 0.0;
 
+    // Tone-stack knobs glide to their targets, so turning or automating them never zips.
+    const VoiceConfig* voiceConfig = &voices[1];
+    std::array<double, 4> eqTarget {}, eqNow {};
+    double eqCoef = 0.0;
+
     // Base-rate cabinet / fizz filter
     std::array<Biquad, 8> cab;
     int cabCount = 0;
 
     Modulation mod;
     juce::Reverb reverb;
+    bool reverbActive = false;
 
     AxiomParams last;
     bool haveLast = false;
@@ -253,6 +313,8 @@ struct AxiomDsp::Impl
         sagAttack = 1.0 - std::exp (-1.0 / (0.004 * fsOs));
         sagRelease = 1.0 - std::exp (-1.0 / (0.12 * fsOs));
         boostCoef = 1.0 - std::exp (-1.0 / (0.02 * fsOs));
+        eqCoef = 1.0 - std::exp (-(double) eqStep / (0.03 * fsOs));
+        gate.prepare (fs);
         mod.prepare (fs);
         reverb.setSampleRate (fs);
         haveLast = false;
@@ -269,12 +331,43 @@ struct AxiomDsp::Impl
         for (auto& f : cab) f.reset();
         sagEnv = 0.0;
         boostNow = boostTarget;
+        eqNow = eqTarget;
+        gate.reset();
+        mod.reset();
         reverb.reset();
+        reverbActive = false;
     }
 
-    void designTone (const AxiomParams& p)
+    static constexpr int eqStep = 32;  // oversampled samples between tone-stack updates
+
+    void designEq()
+    {
+        const auto& v = *voiceConfig;
+        bass.set (lowShelf (fsOs, v.bassHz, 0.7, eqNow[0]));
+        mid.set (peak (fsOs, v.midHz, v.midQ, eqNow[1]));
+        treble.set (highShelf (fsOs, v.trebleHz, 0.7, eqNow[2]));
+        presence.set (highShelf (fsOs, v.presenceHz, 0.7, eqNow[3]));
+    }
+
+    void stepEq()
+    {
+        bool moved = false;
+        for (size_t i = 0; i < eqNow.size(); ++i)
+        {
+            const double diff = eqTarget[i] - eqNow[i];
+            if (diff == 0.0)
+                continue;
+            eqNow[i] = std::abs (diff) < 0.01 ? eqTarget[i] : eqNow[i] + diff * eqCoef;
+            moved = true;
+        }
+        if (moved)
+            designEq();
+    }
+
+    void designVoice (const AxiomParams& p)
     {
         const auto& v = voices[(size_t) juce::jlimit (0, 2, p.voice)];
+        voiceConfig = &v;
         preHp.setHighPass (fsOs, v.preHpHz);
         boostHp.setHighPass (fsOs, 720.0);
         boostLp.setLowPass (fsOs, 4200.0);
@@ -287,10 +380,7 @@ struct AxiomDsp::Impl
             stageHp[(size_t) i].setHighPass (fsOs, v.interHpHz[i]);
             stageLp[(size_t) i].setLowPass (fsOs, v.interLpHz[i]);
         }
-        bass.set (lowShelf (fsOs, v.bassHz, 0.7, p.bassDb));
-        mid.set (peak (fsOs, v.midHz, v.midQ, p.midDb));
-        treble.set (highShelf (fsOs, v.trebleHz, 0.7, p.trebleDb));
-        presence.set (highShelf (fsOs, v.presenceHz, 0.7, p.presenceDb));
+        designEq();
         powerDrive = v.powerDrive;
         sag = v.sag;
         outGain = dbToLin (v.outDb);
@@ -318,18 +408,20 @@ struct AxiomDsp::Impl
 
     void update (const AxiomParams& p)
     {
-        const bool toneChanged = ! haveLast || p.voice != last.voice || p.cabinet != last.cabinet
-                                 || ! juce::exactlyEqual (p.bassDb, last.bassDb) || ! juce::exactlyEqual (p.midDb, last.midDb)
-                                 || ! juce::exactlyEqual (p.trebleDb, last.trebleDb) || ! juce::exactlyEqual (p.presenceDb, last.presenceDb);
-        if (toneChanged)
-            designTone (p);
+        eqTarget = { (double) p.bassDb, (double) p.midDb, (double) p.trebleDb, (double) p.presenceDb };
+        if (! haveLast)
+            eqNow = eqTarget;
+        if (! haveLast || p.voice != last.voice || p.cabinet != last.cabinet)
+            designVoice (p);
         last = p;
         haveLast = true;
 
         const auto& v = voices[(size_t) juce::jlimit (0, 2, p.voice)];
         const double knob = juce::jlimit (0.0, 10.0, (double) p.gain) / 10.0;
         const double driveDb = v.driveLoDb + (v.driveHiDb - v.driveLoDb) * knob;
-        drive.setTargetValue ((float) (dbToLin (driveDb) * dbToLin (p.inputDb)));
+        inputGain = dbToLin (p.inputDb);
+        drive.setTargetValue ((float) (dbToLin (driveDb) * inputGain));
+        gateOpenLevel = p.gateDb > gateOffDb ? dbToLin (juce::jlimit (-80.0, 0.0, (double) p.gateDb)) : 0.0;
         master.setTargetValue ((float) dbToLin (p.masterDb));
         room.setTargetValue (p.room * 0.01f);
         boostTarget = juce::jlimit (0.0, 1.0, p.boost * 0.01);
@@ -390,7 +482,8 @@ struct AxiomDsp::Impl
             for (int i = 0; i < n; ++i)
             {
                 const float src = p.source == 1 ? r[i] : (p.source == 2 ? 0.5f * (l[i] + r[i]) : l[i]);
-                mono[(size_t) i] = src * drive.getNextValue();
+                const double open = gate.process ((double) src * inputGain, gateOpenLevel);
+                mono[(size_t) i] = (float) (src * open) * drive.getNextValue();
             }
 
             float* channels[1] { mono.data() };
@@ -398,7 +491,11 @@ struct AxiomDsp::Impl
             auto up = os.processSamplesUp (block);
             float* u = up.getChannelPointer (0);
             for (size_t k = 0; k < up.getNumSamples(); ++k)
+            {
+                if (k % (size_t) eqStep == 0)
+                    stepEq();
                 u[k] = (float) ampSample ((double) u[k]);
+            }
             os.processSamplesDown (block);
 
             for (int i = 0; i < n; ++i)
@@ -410,6 +507,10 @@ struct AxiomDsp::Impl
             const float roomNow = room.skip (n);
             if (roomNow > 0.0001f)
             {
+                // Coming back from zero: start from an empty room, not a tail from long ago.
+                if (! reverbActive)
+                    reverb.reset();
+                reverbActive = true;
                 juce::Reverb::Parameters rp;
                 rp.roomSize = 0.25f + roomNow * 0.65f;
                 rp.damping = 0.52f;
@@ -421,6 +522,10 @@ struct AxiomDsp::Impl
                     reverb.processStereo (left.data(), right.data(), n);
                 else
                     reverb.processMono (left.data(), n);
+            }
+            else
+            {
+                reverbActive = false;
             }
 
             // Final safety so room and delay tails can never push the output past full scale.

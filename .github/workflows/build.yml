@@ -36,9 +36,13 @@ jobs:
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
           -DAXIOM_BUILD_TOOLS=ON
       - name: Build standalone app and plugins
-        run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU AxiomRender -j 4
+        run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU AxiomRender AxiomSnapshot -j 4
       - name: DSP checks
         run: build/AxiomRender_artefacts/Release/AxiomRender
+      - name: Editor smoke test
+        run: |
+          build/AxiomSnapshot_artefacts/Release/AxiomSnapshot "$RUNNER_TEMP/axiom.png" 1 tuner
+          test -s "$RUNNER_TEMP/axiom.png"
       - name: Ad-hoc sign bundles
         run: |
           for b in Standalone/Axiom.app VST3/Axiom.vst3 AU/Axiom.component; do

@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "AxiomDsp.h"
 #include "Presets.h"
+#include <array>
 
 class AxiomAudioProcessor final : public juce::AudioProcessor,
                                   private juce::AudioProcessorValueTreeState::Listener
@@ -37,12 +38,22 @@ public:
     std::atomic<bool> presetModified { false };
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    /** Tuner: while active the input is captured for pitch detection and the output is muted. */
+    std::atomic<bool> tunerActive { false };
+    static constexpr int tunerBufferSize = 8192;
+    /** Copies the newest `count` input samples (oldest first) into dest and returns the sample rate. */
+    double readTunerInput (float* dest, int count) const;
+
 private:
     axiom::AxiomDsp dsp;
     std::atomic<int> currentPreset { 0 };
     axiom::AxiomParams readParameters();
     void parameterChanged (const juce::String&, float) override;
-    bool applyingPreset = false;
+    std::atomic<bool> applyingPreset { false };
+    std::array<std::atomic<float>, tunerBufferSize> tunerBuffer {};
+    std::atomic<int> tunerWrite { 0 };
+    std::atomic<double> currentSampleRate { 44100.0 };
+    float outputGain = 1.0f;  // ramps to 0 while the tuner mutes the output
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxiomAudioProcessor)
 };

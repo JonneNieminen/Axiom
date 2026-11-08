@@ -18,6 +18,7 @@ constexpr auto boostId = "boost";
 constexpr auto chorusId = "chorus";
 constexpr auto delayMixId = "delayMix";
 constexpr auto delayTimeId = "delayTime";
+constexpr auto gateId = "gate";
 
 juce::String formatValue (float value, const char* unit, int decimals)
 {
@@ -87,6 +88,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createP
     p.add (std::make_unique<Float> (juce::ParameterID { delayMixId, 1 }, "Delay", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 0.0f, percent));
     p.add (std::make_unique<Float> (juce::ParameterID { delayTimeId, 1 }, "Delay Time", juce::NormalisableRange<float> (40.0f, 1000.0f, 1.0f, 0.5f), 380.0f,
                                     juce::AudioParameterFloatAttributes().withLabel (" ms").withStringFromValueFunction ([] (float v, int) { return formatValue (v, " ms", 0); })));
+    p.add (std::make_unique<Float> (juce::ParameterID { gateId, 1 }, "Noise Gate", juce::NormalisableRange<float> (-80.0f, -20.0f, 0.1f), -80.0f,
+                                    juce::AudioParameterFloatAttributes().withLabel (" dB").withStringFromValueFunction ([] (float v, int)
+                                    {
+                                        return v <= axiom::gateOffDb ? juce::String ("Off") : formatValue (v, " dB", 0);
+                                    })));
     return p;
 }
 
@@ -100,6 +106,8 @@ bool AxiomAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 void AxiomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     dsp.prepare (sampleRate, samplesPerBlock);
+    currentSampleRate.store (sampleRate);
+    outputGain = tunerActive.load() ? 0.0f : 1.0f;
     setLatencySamples (dsp.getLatencySamples());
 }
 
@@ -121,6 +129,7 @@ axiom::AxiomParams AxiomAudioProcessor::readParameters()
     p.delayMix = read (parameters, delayMixId);
     p.delayMs = read (parameters, delayTimeId);
     p.cabinet = read (parameters, cabinetId) >= 0.5f;
+    p.gateDb = read (parameters, gateId);
     return p;
 }
 
@@ -134,7 +143,29 @@ void AxiomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const auto params = readParameters();
     const float* inL = buffer.getReadPointer (0);
     const float* inR = channels > 1 ? buffer.getReadPointer (1) : nullptr;
+
+    const bool tuning = tunerActive.load (std::memory_order_relaxed);
+    if (tuning)
+    {
+        int w = tunerWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < samples; ++i)
+        {
+            const float r = inR != nullptr ? inR[i] : inL[i];
+            const float src = params.source == 1 ? r : (params.source == 2 ? 0.5f * (inL[i] + r) : inL[i]);
+            tunerBuffer[(size_t) w].store (src, std::memory_order_relaxed);
+            w = (w + 1) & (tunerBufferSize - 1);
+        }
+        tunerWrite.store (w, std::memory_order_release);
+    }
+
     dsp.process (inL, inR, buffer.getWritePointer (0), channels > 1 ? buffer.getWritePointer (1) : nullptr, samples, params);
+
+    const float targetGain = tuning ? 0.0f : 1.0f;
+    if (! juce::exactlyEqual (outputGain, targetGain) || targetGain < 1.0f)
+    {
+        buffer.applyGainRamp (0, samples, outputGain, targetGain);
+        outputGain = targetGain;
+    }
 
     float peak = 0.0f;
     for (int ch = 0; ch < channels; ++ch)
@@ -166,9 +197,19 @@ void AxiomAudioProcessor::setCurrentProgram (int index)
     set (chorusId, p.chorus);
     set (delayMixId, p.delayMix);
     set (delayTimeId, p.delayMs);
+    set (gateId, p.gateDb);
     applyingPreset = false;
     currentPreset.store (index);
     presetModified.store (false);
+}
+
+double AxiomAudioProcessor::readTunerInput (float* dest, int count) const
+{
+    count = juce::jlimit (0, tunerBufferSize, count);
+    const int end = tunerWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < count; ++i)
+        dest[i] = tunerBuffer[(size_t) ((end - count + i) & (tunerBufferSize - 1))].load (std::memory_order_relaxed);
+    return currentSampleRate.load();
 }
 
 const juce::String AxiomAudioProcessor::getProgramName (int index)

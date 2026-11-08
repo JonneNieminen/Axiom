@@ -33,7 +33,9 @@ Everything runs locally.
 - **Organic gain staging**: cascaded asymmetric tube-style stages with coupling filters, power-amp sag and 8× oversampling, so overdrive stays smooth, dynamic and free of digital fizz. It cleans up when you roll your guitar volume down.
 - **Three amp voices**: Clean (glassy, lots of headroom), Classic (plexi-style crunch) and Modern (tight, hot-rodded high gain).
 - **Tone presets**: George Lynch, Van Halen, David Gilmour, Mark Knopfler (clean and Les Paul distorted) and a huge 80s chorus clean. Every control stays adjustable.
-- **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp.
+- **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp. Tone knobs glide instead of stepping, so automating them never zips.
+- **Noise gate** in front of the amp that silences hum and hiss between notes without chopping decaying notes. The high-gain presets turn it on.
+- **Tuner** in the header: click it, play a string, and it shows the note and how many cents you are off. The output mutes while you tune.
 - **Built-in cabinet**: a 2×12-style speaker response you can switch off.
 - **Effects**: stereo chorus, a darkening stereo delay and a small room reverb.
 - **Tone Match**: analyze a short reference recording and apply a suggested voice, gain and EQ. The file never leaves your computer.
@@ -81,6 +83,7 @@ These tones are inspired by the amps, guitars and pedals behind each sound; they
 |---|---|
 | **Voice** | Choose Clean, Classic or Modern preamp response. |
 | **Input trim** | Set the level hitting the preamp. |
+| **Gate** | Noise gate threshold. Raise it until the hiss between notes disappears; lower it if note tails get cut. All the way down is off. |
 | **Gain** | Move from clean response into saturation. |
 | **Bass · Middle · Treble · Presence** | Balance the amp's low end, body, edge and upper harmonics. |
 | **Master** | Set the output level after the amp and cabinet. |
@@ -90,6 +93,12 @@ These tones are inspired by the amps, guitars and pedals behind each sound; they
 | **Room** | Blend in a small stereo room reverb. |
 | **Input** | Choose Left, Right or Left + Right as the guitar source. |
 | **Cabinet Sim** | Engage the internal 2×12-style speaker response. |
+
+Hover any control for a short explanation, and double-click a knob to reset it.
+
+### Tune up
+
+Click **Tuner** in the header and play one open string. It shows the nearest note (A4 = 440 Hz) and a needle that turns amber within 3 cents. The output is muted while the tuner is on; click it again to play.
 
 ### Match a reference
 
@@ -117,7 +126,7 @@ cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_
 
 Products appear under `build/Axiom_artefacts/Release/`. Use `x86_64` for Intel or `arm64;x86_64` for a universal binary, add `-DJUCE_DIR=/path/to/JUCE` if JUCE lives elsewhere, or use `-G Xcode` to generate an Xcode project. Open the folder in VS Code with the recommended CMake Tools extension to build from the editor.
 
-Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, and optionally writes WAV files.
+Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/amp.png` renders the interface to a PNG without a host (add a preset number, and `tuner` to show the tuner); it is how the README screenshot is made.
 
 Build the drag-to-install DMG with `build/macos/make-dmg.sh build/Axiom_artefacts/Release/Standalone/Axiom.app 1.0.0 arm64 dist`.
 

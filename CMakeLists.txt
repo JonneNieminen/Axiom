@@ -43,6 +43,7 @@ target_sources(Axiom PRIVATE
     Source/ToneMatchAnalyzer.cpp
     Source/ToneMatchAnalyzer.h
     Source/DesignTokens.h
+    Source/PitchDetector.h
 )
 
 target_compile_definitions(Axiom PUBLIC
@@ -61,7 +62,7 @@ target_link_libraries(Axiom PRIVATE
     juce::juce_recommended_warning_flags
 )
 
-# Offline renderer: pushes a synthetic plucked-string signal through every preset, writes WAV files
+# Developer tools. Offline renderer: pushes a synthetic plucked-string signal through every preset, writes WAV files
 # and prints level, balance, aliasing and NaN checks. Configure with -DAXIOM_BUILD_TOOLS=ON.
 option(AXIOM_BUILD_TOOLS "Build developer tools (axiom-render)" OFF)
 if (AXIOM_BUILD_TOOLS)
@@ -71,5 +72,16 @@ if (AXIOM_BUILD_TOOLS)
     target_compile_definitions(AxiomRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(AxiomRender PRIVATE
         juce::juce_dsp juce::juce_audio_formats
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
+    # Renders the editor to a PNG with no host or window: README screenshots and a UI smoke test.
+    juce_add_console_app(AxiomSnapshot PRODUCT_NAME "axiom-snapshot")
+    juce_generate_juce_header(AxiomSnapshot)
+    target_sources(AxiomSnapshot PRIVATE tools/snapshot/Main.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
+                                         Source/AxiomDsp.cpp Source/ToneMatchAnalyzer.cpp)
+    target_include_directories(AxiomSnapshot PRIVATE Source)
+    target_compile_definitions(AxiomSnapshot PRIVATE JucePlugin_Name="Axiom" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(AxiomSnapshot PRIVATE
+        juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()

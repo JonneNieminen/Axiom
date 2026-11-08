@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "DesignTokens.h"
+#include "PitchDetector.h"
 
 namespace
 {
@@ -47,10 +48,13 @@ AxiomLookAndFeel::AxiomLookAndFeel()
     setColour (juce::PopupMenu::textColourId, cream);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, amberSoft);
     setColour (juce::PopupMenu::highlightedTextColourId, amber);
+    setColour (juce::TooltipWindow::backgroundColourId, surfaceHi);
+    setColour (juce::TooltipWindow::textColourId, cream);
+    setColour (juce::TooltipWindow::outlineColourId, borderHi);
 }
 
 void AxiomLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h,
-                                         float pos, float angleStart, float angleEnd, juce::Slider&)
+                                         float pos, float angleStart, float angleEnd, juce::Slider& slider)
 {
     const float diameter = juce::jmin ((float) w, (float) h) - 10.0f;
     const float radius = diameter * 0.5f;
@@ -60,12 +64,24 @@ void AxiomLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w,
     const auto knob = juce::Rectangle<float> (cx - radius * 0.77f, cy - radius * 0.77f,
                                                radius * 1.54f, radius * 1.54f);
 
-    g.setColour (raised);
-    g.drawEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 2.0f);
-    const float markerX = cx + std::cos (angle - juce::MathConstants<float>::halfPi) * radius;
-    const float markerY = cy + std::sin (angle - juce::MathConstants<float>::halfPi) * radius;
-    g.setColour (amber);
-    g.fillEllipse (markerX - 3.2f, markerY - 3.2f, 6.4f, 6.4f);
+    // Value arc: from the start, or from 0 dB for cut/boost controls.
+    const float arcRadius = radius - 2.0f;
+    const float thickness = juce::jlimit (2.5f, 4.0f, radius * 0.06f);
+    const juce::PathStrokeType stroke (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+    juce::Path track;
+    track.addCentredArc (cx, cy, arcRadius, arcRadius, 0.0f, angleStart, angleEnd, true);
+    g.setColour (border);
+    g.strokePath (track, stroke);
+    float from = angleStart;
+    if ((bool) slider.getProperties().getWithDefault ("bipolar", false))
+        from = angleStart + (float) slider.valueToProportionOfLength (0.0) * (angleEnd - angleStart);
+    if (std::abs (angle - from) > 0.01f)
+    {
+        juce::Path value;
+        value.addCentredArc (cx, cy, arcRadius, arcRadius, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
+        g.setColour (slider.isEnabled() ? amber : muted);
+        g.strokePath (value, stroke);
+    }
 
     g.setColour (juce::Colour (0x28000000));
     g.fillEllipse (knob.translated (0.0f, 2.0f));
@@ -137,7 +153,7 @@ void AxiomLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& bu
         fill = primary ? juce::Colour (0xffffd27a) : elevated;
     g.setColour (fill);
     g.fillRoundedRectangle (r, 10.0f);
-    g.setColour (primary ? amber : (highlighted ? strong : border));
+    g.setColour (primary && button.isEnabled() ? amber : (highlighted ? strong : border));
     g.drawRoundedRectangle (r, 10.0f, 1.0f);
 }
 
@@ -149,8 +165,120 @@ void AxiomLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& butt
     g.drawText (button.getButtonText(), button.getLocalBounds().reduced (8, 0), juce::Justification::centred);
 }
 
+AxiomTunerDisplay::AxiomTunerDisplay (AxiomAudioProcessor& p) : processor (p)
+{
+    setTooltip ("Tuner. Click to tune: the output mutes while it is on. Click again to play.");
+    setTitle ("Tuner");
+    setWantsKeyboardFocus (true);
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    scratch.resize ((size_t) AxiomAudioProcessor::tunerBufferSize);
+}
+
+void AxiomTunerDisplay::toggle()
+{
+    processor.tunerActive.store (! processor.tunerActive.load());
+    smoothedHz = 0.0;
+    framesWithoutPitch = 0;
+    repaint();
+}
+
+void AxiomTunerDisplay::mouseUp (const juce::MouseEvent& e)
+{
+    if (getLocalBounds().contains (e.getPosition()))
+        toggle();
+}
+
+bool AxiomTunerDisplay::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::spaceKey || key == juce::KeyPress::returnKey)
+    {
+        toggle();
+        return true;
+    }
+    return false;
+}
+
+void AxiomTunerDisplay::update()
+{
+    if (! processor.tunerActive.load())
+        return;
+
+    double rate = processor.readTunerInput (scratch.data(), 0);
+    const int count = juce::jmin (AxiomAudioProcessor::tunerBufferSize, axiom::pitchWindowFor (rate));
+    rate = processor.readTunerInput (scratch.data(), count);
+    const auto reading = axiom::detectPitch (scratch.data(), count, rate);
+    if (reading.hz > 0.0 && reading.clarity > 0.85)
+    {
+        // Glide within a semitone so the needle settles; jump when a new string is played.
+        if (smoothedHz > 0.0 && std::abs (12.0 * std::log2 (reading.hz / smoothedHz)) < 1.0)
+            smoothedHz *= std::pow (reading.hz / smoothedHz, 0.4);
+        else
+            smoothedHz = reading.hz;
+        framesWithoutPitch = 0;
+    }
+    else if (++framesWithoutPitch > 20)
+    {
+        smoothedHz = 0.0;
+    }
+    repaint();
+}
+
+void AxiomTunerDisplay::paint (juce::Graphics& g)
+{
+    const bool active = processor.tunerActive.load();
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (active ? raised : panel);
+    g.fillRoundedRectangle (r, 12.0f);
+    g.setColour (active ? amber : (isMouseOver() || hasKeyboardFocus (false) ? strong : border));
+    g.drawRoundedRectangle (r, 12.0f, 1.0f);
+
+    g.setColour (active ? amber : muted);
+    g.setFont (juce::Font (juce::FontOptions (9.0f, juce::Font::bold)));
+    g.drawText (active ? "TUNER  " + dot.trim() + "  OUTPUT MUTED" : juce::String ("TUNER"),
+                (int) r.getX() + 12, (int) r.getY() + 7, (int) r.getWidth() - 24, 14, juce::Justification::centredLeft);
+
+    const auto body = juce::Rectangle<float> (r.getX() + 12.0f, r.getY() + 22.0f, r.getWidth() - 24.0f, 18.0f);
+    if (! active)
+    {
+        g.setColour (secondary);
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawText ("Click to tune", body.toNearestInt(), juce::Justification::centredLeft);
+        return;
+    }
+    if (smoothedHz <= 0.0)
+    {
+        g.setColour (secondary);
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawText ("Play one string", body.toNearestInt(), juce::Justification::centredLeft);
+        return;
+    }
+
+    const auto note = axiom::noteFor (smoothedHz);
+    const bool inTune = std::abs (note.cents) < 3.0;
+    g.setColour (inTune ? amber : cream);
+    g.setFont (juce::Font (juce::FontOptions (17.0f, juce::Font::bold)));
+    g.drawText (juce::String (axiom::noteName (note.midi)) + juce::String (note.midi / 12 - 1),
+                body.withWidth (40.0f).translated (0.0f, -1.0f).toNearestInt(), juce::Justification::centredLeft);
+
+    // Cents scale: centre tick, a dot for the offset and the number on the right.
+    const auto scale = juce::Rectangle<float> (body.getX() + 44.0f, body.getCentreY(), body.getWidth() - 44.0f - 38.0f, 0.0f);
+    g.setColour (border);
+    g.drawLine (scale.getX(), scale.getY(), scale.getRight(), scale.getY(), 2.0f);
+    g.setColour (secondary);
+    g.drawLine (scale.getCentreX(), scale.getY() - 5.0f, scale.getCentreX(), scale.getY() + 5.0f, 1.5f);
+    const float px = scale.getCentreX() + (float) juce::jlimit (-50.0, 50.0, note.cents) / 50.0f * scale.getWidth() * 0.5f;
+    g.setColour (inTune ? amber : cream);
+    g.fillEllipse (px - 4.0f, scale.getY() - 4.0f, 8.0f, 8.0f);
+    g.setColour (secondary);
+    g.setFont (juce::Font (juce::FontOptions (10.0f)));
+    const int cents = juce::roundToInt (note.cents);
+    g.drawText ((cents > 0 ? "+" : "") + juce::String (cents) + juce::String::fromUTF8 (" \xc2\xa2"),
+                juce::Rectangle<float> (body.getRight() - 36.0f, body.getY(), 36.0f, body.getHeight()).toNearestInt(),
+                juce::Justification::centredRight);
+}
+
 AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+    : AudioProcessorEditor (&p), audioProcessor (p), tuner (p)
 {
     setLookAndFeel (&lookAndFeel);
     setSize (1080, 820);
@@ -181,19 +309,22 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     ampSubheading.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (ampSubheading);
 
-    configureSlider (gain, gainLabel, "GAIN");
-    configureSlider (bass, bassLabel, "BASS");
-    configureSlider (middle, middleLabel, "MIDDLE");
-    configureSlider (treble, trebleLabel, "TREBLE");
-    configureSlider (presence, presenceLabel, "PRESENCE");
-    configureSlider (master, masterLabel, "MASTER");
-    configureSlider (input, inputLabel, "INPUT TRIM");
-    configureSlider (room, roomKnobLabel, "ROOM");
+    configureSlider (gain, gainLabel, "GAIN", "How hard the preamp is driven, from clean to saturated.");
+    configureSlider (bass, bassLabel, "BASS", "Low end. Cut it for tighter high-gain rhythm.", true);
+    configureSlider (middle, middleLabel, "MIDDLE", "Body and punch. Boost it to cut through a band.", true);
+    configureSlider (treble, trebleLabel, "TREBLE", "Edge and pick attack.", true);
+    configureSlider (presence, presenceLabel, "PRESENCE", "Upper harmonics after the power amp: air and bite.", true);
+    configureSlider (master, masterLabel, "MASTER", "Output level after the amp and cabinet.");
+    configureSlider (input, inputLabel, "INPUT TRIM", "Level hitting the preamp. Raise it if your interface is quiet.", true);
+    configureSlider (gate, gateLabel, "GATE", "Noise gate. Silences hum and hiss between notes. Lower it if note tails get cut; all the way down is off.");
+    configureSlider (room, roomKnobLabel, "ROOM", "A small stereo room reverb.");
 
-    configureSlider (boost, boostLabel, "BOOST");
-    configureSlider (chorus, chorusLabel, "CHORUS");
-    configureSlider (delayMix, delayMixLabel, "DELAY");
-    configureSlider (delayTime, delayTimeLabel, "DELAY TIME");
+    configureSlider (boost, boostLabel, "BOOST", "A mid-focused overdrive in front of the amp, for leads.");
+    configureSlider (chorus, chorusLabel, "CHORUS", "Stereo chorus after the cabinet.");
+    configureSlider (delayMix, delayMixLabel, "DELAY", "Level of the darkening stereo delay.");
+    configureSlider (delayTime, delayTimeLabel, "DELAY TIME", "Delay time, 40 ms to 1 s.");
+
+    addAndMakeVisible (tuner);
 
     configureSectionLabel (presetLabel, "TONE PRESET");
     addAndMakeVisible (presetLabel);
@@ -223,10 +354,12 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     voice.setSelectedId (2, juce::dontSendNotification);
     voice.setJustificationType (juce::Justification::centredLeft);
     voice.setTextWhenNothingSelected ("Choose a voice");
+    voice.setTooltip ("Clean: glassy, lots of headroom. Classic: plexi-style crunch. Modern: tight, hot-rodded high gain.");
     addAndMakeVisible (voice);
 
     cabinet.setButtonText ("CABINET SIM");
     cabinet.setClickingTogglesState (true);
+    cabinet.setTooltip ("The built-in 2x12 speaker response. Turn it off to use your own cabinet impulse response after Axiom.");
     addAndMakeVisible (cabinet);
     cabinetCaption.setText (juce::String::fromUTF8 ("2\xc3\x97" "12 \xc2\xb7 studio cabinet"), juce::dontSendNotification);
     cabinetCaption.setFont (juce::Font (juce::FontOptions (10.0f)));
@@ -261,20 +394,21 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     addAndMakeVisible (applyToneButton);
 
     auto& state = p.parameters;
-    gainAttachment = std::make_unique<SliderAttachment> (state, "gain", gain);
-    bassAttachment = std::make_unique<SliderAttachment> (state, "bass", bass);
-    middleAttachment = std::make_unique<SliderAttachment> (state, "mid", middle);
-    trebleAttachment = std::make_unique<SliderAttachment> (state, "treble", treble);
-    presenceAttachment = std::make_unique<SliderAttachment> (state, "presence", presence);
-    masterAttachment = std::make_unique<SliderAttachment> (state, "master", master);
-    inputAttachment = std::make_unique<SliderAttachment> (state, "input", input);
-    roomAttachment = std::make_unique<SliderAttachment> (state, "room", room);
+    attach (gain, "gain", gainAttachment);
+    attach (bass, "bass", bassAttachment);
+    attach (middle, "mid", middleAttachment);
+    attach (treble, "treble", trebleAttachment);
+    attach (presence, "presence", presenceAttachment);
+    attach (master, "master", masterAttachment);
+    attach (input, "input", inputAttachment);
+    attach (gate, "gate", gateAttachment);
+    attach (room, "room", roomAttachment);
     voiceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, "voice", voice);
     cabinetAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, "cabinet", cabinet);
-    boostAttachment = std::make_unique<SliderAttachment> (state, "boost", boost);
-    chorusAttachment = std::make_unique<SliderAttachment> (state, "chorus", chorus);
-    delayMixAttachment = std::make_unique<SliderAttachment> (state, "delayMix", delayMix);
-    delayTimeAttachment = std::make_unique<SliderAttachment> (state, "delayTime", delayTime);
+    attach (boost, "boost", boostAttachment);
+    attach (chorus, "chorus", chorusAttachment);
+    attach (delayMix, "delayMix", delayMixAttachment);
+    attach (delayTime, "delayTime", delayTimeAttachment);
     sourceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, "inputSource", inputSource);
     startTimerHz (30);
 }
@@ -282,12 +416,25 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
 AxiomAudioProcessorEditor::~AxiomAudioProcessorEditor()
 {
     stopTimer();
+    // Never leave the output muted once the window that shows the tuner is gone.
+    audioProcessor.tunerActive.store (false);
     analysisPool.removeAllJobs (true, -1);
     setLookAndFeel (nullptr);
 }
 
-void AxiomAudioProcessorEditor::configureSlider (juce::Slider& slider, juce::Label& label, const juce::String& text)
+void AxiomAudioProcessorEditor::attach (juce::Slider& slider, const juce::String& parameterId,
+                                        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment)
 {
+    attachment = std::make_unique<SliderAttachment> (audioProcessor.parameters, parameterId, slider);
+    if (auto* parameter = audioProcessor.parameters.getParameter (parameterId))
+        slider.setDoubleClickReturnValue (true, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+}
+
+void AxiomAudioProcessorEditor::configureSlider (juce::Slider& slider, juce::Label& label, const juce::String& text,
+                                                 const juce::String& tooltip, bool bipolar)
+{
+    slider.getProperties().set ("bipolar", bipolar);
+    slider.setTooltip (tooltip + " Double-click to reset.");
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 21);
     slider.setColour (juce::Slider::textBoxTextColourId, secondary);
@@ -302,6 +449,7 @@ void AxiomAudioProcessorEditor::configureSlider (juce::Slider& slider, juce::Lab
     label.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     label.setColour (juce::Label::textColourId, secondary);
     label.setJustificationType (juce::Justification::centred);
+    label.setTooltip (slider.getTooltip());
     addAndMakeVisible (label);
 }
 
@@ -385,7 +533,7 @@ void AxiomAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillRoundedRectangle (ampCard.getX() + 18.0f, ampCard.getY() + 18.0f, 3.0f, 35.0f, 1.5f);
     g.setColour (border);
     g.drawLine (ampCard.getX() + 24.0f, ampCard.getY() + 65.0f, ampCard.getRight() - 24.0f, ampCard.getY() + 65.0f, 1.0f);
-    drawOutputMeter (g, { (float) getWidth() - 240.0f, 38.0f, 188.0f, 48.0f });
+    drawOutputMeter (g, meterArea());
 
     auto controlsCard = juce::Rectangle<float> (36.0f, 462.0f, (float) getWidth() - 72.0f, 150.0f);
     g.setColour (panel);
@@ -430,24 +578,27 @@ void AxiomAudioProcessorEditor::resized()
         sliders[i]->setBounds (x + 3, 215, controlWidth - 6, 202);
     }
 
-    presetLabel.setBounds (w - 560, 33, 200, 14);
-    preset.setBounds (w - 560, 49, 300, 36);
+    presetLabel.setBounds (w - 540, 33, 200, 14);
+    preset.setBounds (w - 540, 49, 276, 36);
+    tuner.setBounds (w - 744, 38, 188, 48);
 
     voiceLabel.setBounds (58, 474, 170, 14);
     voice.setBounds (58, 491, 190, 34);
     sourceLabel.setBounds (58, 538, 170, 14);
     inputSource.setBounds (58, 555, 190, 34);
 
-    juce::Slider* extras[] = { &input, &boost, &chorus, &delayMix, &delayTime, &room };
-    juce::Label* extraLabels[] = { &inputLabel, &boostLabel, &chorusLabel, &delayMixLabel, &delayTimeLabel, &roomKnobLabel };
-    for (int i = 0; i < 6; ++i)
+    juce::Slider* extras[] = { &input, &gate, &boost, &chorus, &delayMix, &delayTime, &room };
+    juce::Label* extraLabels[] = { &inputLabel, &gateLabel, &boostLabel, &chorusLabel, &delayMixLabel, &delayTimeLabel, &roomKnobLabel };
+    const int extrasX = 264, cabinetX = w - 232;
+    const int pitch = juce::jmin (92, (cabinetX - 16 - extrasX) / 7);
+    for (int i = 0; i < 7; ++i)
     {
-        const int x = 268 + i * 90;
-        extraLabels[i]->setBounds (x, 474, 88, 14);
-        extras[i]->setBounds (x, 491, 88, 117);
+        const int x = extrasX + i * pitch;
+        extraLabels[i]->setBounds (x, 474, pitch - 2, 14);
+        extras[i]->setBounds (x, 491, pitch - 2, 117);
     }
-    cabinet.setBounds (w - 252, 496, 196, 44);
-    cabinetCaption.setBounds (w - 241, 548, 180, 16);
+    cabinet.setBounds (cabinetX, 496, 176, 44);
+    cabinetCaption.setBounds (cabinetX + 11, 548, 165, 16);
 
     toneMatchHeading.setBounds (58, 644, 220, 18);
     toneMatchDescription.setBounds (58, 667, 270, 44);
@@ -543,5 +694,6 @@ void AxiomAudioProcessorEditor::timerCallback()
     const int selected = audioProcessor.presetModified.load() ? 0 : audioProcessor.getCurrentProgram() + 1;
     if (preset.getSelectedId() != selected)
         preset.setSelectedId (selected, juce::dontSendNotification);
-    repaint();
+    tuner.update();
+    repaint (meterArea().expanded (2.0f).toNearestInt());
 }

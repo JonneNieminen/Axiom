@@ -2,6 +2,7 @@
 // Usage: axiom-render [output-directory]
 #include "AxiomDsp.h"
 #include "Presets.h"
+#include "PitchDetector.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cmath>
 #include <cstdio>
@@ -224,6 +225,58 @@ int main (int argc, char** argv)
         for (float a : { 0.02f, 0.05f, 0.1f, 0.2f, 0.4f })
             std::printf ("%7.1f ", thdPercent (preset.params, fs, 330.0, a));
         std::printf ("\n");
+    }
+
+    // Noise gate: a short note, then interface hiss peaking at -72 dBFS. With the gate on, the
+    // hiss must be gone once the note has died; the note itself must come through untouched.
+    {
+        std::vector<float> sig ((size_t) (4.0 * fs), 0.0f);
+        juce::Random rng (99);
+        pluck (sig, fs, 0.05, 110.0, 0.6, 0.3f, rng);
+        const float hiss = (float) std::pow (10.0, -72.0 / 20.0);
+        for (auto& v : sig) v += hiss * (rng.nextFloat() * 2.0f - 1.0f);
+        const auto run = [&] (float gateDb, double fromSec, double toSec)
+        {
+            auto p = axiom::factoryPresets[1].params;  // high gain makes hiss loud
+            p.gateDb = gateDb; p.room = 0; p.delayMix = 0;
+            axiom::AxiomDsp dsp;
+            dsp.prepare (fs, 512);
+            std::vector<float> l (sig.size()), r (sig.size());
+            for (size_t i = 0; i < sig.size(); i += 512)
+                dsp.process (sig.data() + i, nullptr, l.data() + i, r.data() + i, (int) std::min<size_t> (512, sig.size() - i), p);
+            double sq = 0;
+            const auto a = (size_t) (fromSec * fs), b = (size_t) (toSec * fs);
+            for (size_t i = a; i < b; ++i) sq += (double) l[i] * l[i];
+            return toDb (std::sqrt (sq / (double) (b - a)));
+        };
+        const double noteOff = run (-80.0f, 0.1, 0.5), noteOn = run (-62.0f, 0.1, 0.5);
+        const double hissOff = run (-80.0f, 3.0, 4.0), hissOn = run (-62.0f, 3.0, 4.0);
+        const bool ok = hissOn < -80.0 && hissOn < hissOff - 30.0 && std::abs (noteOn - noteOff) < 1.0;
+        std::printf ("\nNoise gate (George Lynch, -62 dB): note %.1f -> %.1f dB, hiss %.1f -> %.1f dB%s\n",
+                     noteOff, noteOn, hissOff, hissOn, ok ? "" : "  FAIL");
+        if (! ok) ++failures;
+    }
+
+    // Tuner: Karplus-Strong plucks have a fundamental of fs / (period + 0.5).
+    {
+        double worst = 0;
+        for (double rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (double f : { 73.42, 82.41, 110.0, 146.83, 196.0, 246.94, 329.63, 659.26, 1046.5 })
+            {
+                std::vector<float> sig ((size_t) rate, 0.0f);
+                juce::Random rng (7);
+                pluck (sig, rate, 0.0, f, 1.0, 0.3f, rng);
+                const double expected = rate / ((double) std::round (rate / f) + 0.5);
+                const auto reading = axiom::detectPitch (sig.data() + (size_t) (0.2 * rate), axiom::pitchWindowFor (rate), rate);
+                const double cents = reading.hz > 0 ? 1200.0 * std::log2 (reading.hz / expected) : 1.0e9;
+                worst = std::max (worst, std::abs (cents));
+                if (std::abs (cents) > 3.0)
+                {
+                    std::printf ("FAIL tuner %.2f Hz @ %.0f Hz: read %.2f Hz\n", expected, rate, reading.hz);
+                    ++failures;
+                }
+            }
+        std::printf ("Tuner: worst error %.2f cents over 9 notes at 44.1, 48, 96 and 192 kHz\n", worst);
     }
 
     // Sample-rate safety: every preset at common rates must stay finite and bounded.
