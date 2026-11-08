@@ -496,6 +496,19 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     cabinetCaption.setBorderSize ({ 0, 0, 0, 0 });
     addAndMakeVisible (cabinetCaption);
 
+    configureSectionLabel (engineLabel, "AMP ENGINE");
+    addAndMakeVisible (engineLabel);
+    engineSelector.setTooltip ("Standard: Axiom's original tube-style stages, light on CPU. Physical: the 12AX7 stages, power supply "
+                               "and push-pull power amp solved as circuits, sample by sample. Physical uses several times more CPU.");
+    engineSelector.setTitle ("Amp engine");
+    addAndMakeVisible (engineSelector);
+    configureSectionLabel (mathLabel, "TUBE MATH");
+    addAndMakeVisible (mathLabel);
+    mathSelector.setTooltip ("Physical engine only. Fast: table-based exp/log, at most 4 solver iterations per sample. "
+                             "Exact: the system math library and up to 6 iterations, for more CPU. They differ far below audibility.");
+    mathSelector.setTitle ("Tube math");
+    addAndMakeVisible (mathSelector);
+
     themeSelector.setTooltip ("Dark or light interface. Saved with your session.");
     themeSelector.setTitle ("Theme");
     themeSelector.setSelected (p.darkTheme.load() ? 0 : 1);
@@ -557,8 +570,35 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
         voiceAttachment->sendInitialUpdate();
     }
 
+    bindSegmented (engineSelector, "engine", engineAttachment);
+    bindSegmented (mathSelector, "tubeMath", mathAttachment);
+    refreshEngineControls();
+
     applyTheme();
     startTimerHz (30);
+}
+
+void AxiomAudioProcessorEditor::bindSegmented (AxiomSegmented& selector, const char* parameterId,
+                                               std::unique_ptr<juce::ParameterAttachment>& attachment)
+{
+    if (auto* parameter = audioProcessor.parameters.getParameter (parameterId))
+    {
+        attachment = std::make_unique<juce::ParameterAttachment> (*parameter, [this, &selector] (float v)
+        {
+            selector.setSelected (juce::roundToInt (v));
+            refreshEngineControls();
+        });
+        selector.onChange = [&attachment] (int index) { attachment->setValueAsCompleteGesture ((float) index); };
+        attachment->sendInitialUpdate();
+    }
+}
+
+/** Tube math only matters to the Physical engine, so it is dimmed (but still settable) otherwise. */
+void AxiomAudioProcessorEditor::refreshEngineControls()
+{
+    const bool physical = audioProcessor.parameters.getRawParameterValue ("engine")->load() >= 0.5f;
+    mathSelector.setAlpha (physical ? 1.0f : 0.45f);
+    mathLabel.setAlpha (physical ? 1.0f : 0.45f);
 }
 
 AxiomAudioProcessorEditor::~AxiomAudioProcessorEditor()
@@ -609,7 +649,7 @@ void AxiomAudioProcessorEditor::applyTheme()
     const auto& t = current();
     axiom::theme::use (audioProcessor.darkTheme.load());
     lookAndFeel.refreshColours();
-    for (auto* label : { &presetLabel, &voiceLabel, &sourceLabel, &tunerLabel })
+    for (auto* label : { &presetLabel, &voiceLabel, &sourceLabel, &tunerLabel, &engineLabel, &mathLabel })
         label->setColour (juce::Label::textColourId, t.faint);
     for (auto* label : { &cabinetCaption, &footnote, &referenceStatus })
         label->setColour (juce::Label::textColourId, t.muted);
@@ -736,6 +776,8 @@ void AxiomAudioProcessorEditor::drawChips (juce::Graphics& g, juce::Rectangle<fl
     chip (voices[juce::jlimit (0, 2, voice)], t.voice (voice));
     chip (gateDb > axiom::gateOffDb ? "Gate " + juce::String (juce::roundToInt (gateDb)) + " dB" : juce::String ("Gate off"), {});
     chip (cab ? "Cabinet on" : "Cabinet off", {});
+    if (audioProcessor.parameters.getRawParameterValue ("engine")->load() >= 0.5f)
+        chip (juce::String::fromUTF8 (audioProcessor.parameters.getRawParameterValue ("tubeMath")->load() >= 0.5f ? "Physical \xc2\xb7 Exact" : "Physical \xc2\xb7 Fast"), {});
     if (audioProcessor.presetModified.load())
         chip ("Edited", {}, true);
 }
@@ -819,6 +861,10 @@ void AxiomAudioProcessorEditor::resized()
     tuner.setBounds (sx, 320, sw, 56);
     cabinet.setBounds (sx, 398, sw, 28);
     cabinetCaption.setBounds (sx, 426, sw, 16);
+    engineLabel.setBounds (sx, 462, sw, 14);
+    engineSelector.setBounds (sx, 480, sw, 36);
+    mathLabel.setBounds (sx, 532, sw, 14);
+    mathSelector.setBounds (sx, 550, sw, 36);
     themeSelector.setBounds (sx, getHeight() - 96, sw, 36);
     footnote.setBounds (sx, getHeight() - 48, sw, 32);
 
@@ -1178,7 +1224,9 @@ void AxiomAudioProcessorEditor::timerCallback()
     }
     const auto header = currentToneName() + juce::String (voice) + juce::String (audioProcessor.presetModified.load() ? 1 : 0)
                         + juce::String (audioProcessor.parameters.getRawParameterValue ("gate")->load(), 0)
-                        + juce::String (audioProcessor.parameters.getRawParameterValue ("cabinet")->load(), 0);
+                        + juce::String (audioProcessor.parameters.getRawParameterValue ("cabinet")->load(), 0)
+                        + juce::String (audioProcessor.parameters.getRawParameterValue ("engine")->load(), 0)
+                        + juce::String (audioProcessor.parameters.getRawParameterValue ("tubeMath")->load(), 0);
     const auto l = computeLayout();
     if (header != shownHeader)
     {

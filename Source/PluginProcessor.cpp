@@ -19,6 +19,12 @@ constexpr auto chorusId = "chorus";
 constexpr auto delayMixId = "delayMix";
 constexpr auto delayTimeId = "delayTime";
 constexpr auto gateId = "gate";
+constexpr auto engineId = "engine";
+constexpr auto tubeMathId = "tubeMath";
+
+/** Controls a user preset leaves alone: the input channel is hardware, and the tube math
+    is a CPU-vs-precision choice for this computer, not part of a tone. */
+bool isMachineSetting (const juce::String& id) { return id == sourceId || id == tubeMathId; }
 
 juce::String formatValue (float value, const char* unit, int decimals)
 {
@@ -93,6 +99,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout AxiomAudioProcessor::createP
                                     {
                                         return v <= axiom::gateOffDb ? juce::String ("Off") : formatValue (v, " dB", 0);
                                     })));
+    // Added after 1.0: the defaults (Standard engine, Fast math) keep old sessions sounding the same.
+    p.add (std::make_unique<Choice> (juce::ParameterID { engineId, 1 }, "Amp Engine",
+                                     juce::StringArray { "Standard", "Physical" }, 0));
+    p.add (std::make_unique<Choice> (juce::ParameterID { tubeMathId, 1 }, "Tube Math",
+                                     juce::StringArray { "Fast", "Exact" }, 0));
     return p;
 }
 
@@ -130,6 +141,8 @@ axiom::AxiomParams AxiomAudioProcessor::readParameters()
     p.delayMs = read (parameters, delayTimeId);
     p.cabinet = read (parameters, cabinetId) >= 0.5f;
     p.gateDb = read (parameters, gateId);
+    p.engine = juce::roundToInt (read (parameters, engineId));
+    p.tubeMath = juce::roundToInt (read (parameters, tubeMathId));
     return p;
 }
 
@@ -250,7 +263,7 @@ juce::Result AxiomAudioProcessor::saveUserPreset (const juce::String& rawName)
     xml.setAttribute ("version", 1);
     for (auto* parameter : getParameters())
         if (auto* withId = dynamic_cast<juce::RangedAudioParameter*> (parameter))
-            if (withId->paramID != sourceId)  // the input channel is hardware, not tone
+            if (! isMachineSetting (withId->paramID))
             {
                 auto* e = xml.createNewChildElement ("param");
                 e->setAttribute ("id", withId->paramID);
@@ -279,7 +292,7 @@ juce::Result AxiomAudioProcessor::loadUserPreset (const juce::File& file)
     for (auto* parameter : getParameters())
         if (auto* withId = dynamic_cast<juce::RangedAudioParameter*> (parameter))
         {
-            if (withId->paramID == sourceId)
+            if (isMachineSetting (withId->paramID))
                 continue;
             // A control the preset doesn't know (saved by an older Axiom) goes to its default.
             float normalised = withId->getDefaultValue();

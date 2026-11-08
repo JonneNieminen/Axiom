@@ -61,11 +61,14 @@ int runChecks()
 
     // A session saved before the gate existed must come back with the gate off.
     auto old = processor.parameters.copyState();
-    old.removeChild (old.getChildWithProperty ("id", "gate"), nullptr);
+    for (auto* id : { "gate", "engine", "tubeMath" })
+        old.removeChild (old.getChildWithProperty ("id", id), nullptr);
     juce::MemoryBlock oldState;
     AxiomAudioProcessor::copyXmlToBinary (*old.createXml(), oldState);
     AxiomAudioProcessor fromOld;
     set (fromOld, "gate", -50.0f);
+    set (fromOld, "engine", 1.0f);
+    set (fromOld, "tubeMath", 1.0f);
     fromOld.setStateInformation (oldState.getData(), (int) oldState.getSize());
     expect (value (fromOld, "gate") <= axiom::gateOffDb, "old sessions load with the gate off");
 
@@ -79,6 +82,29 @@ int runChecks()
     AxiomAudioProcessor darkDefault;
     darkDefault.setStateInformation (oldState.getData(), (int) oldState.getSize());
     expect (darkDefault.darkTheme.load(), "old sessions open dark");
+
+    // The amp engine is part of a tone; tube math is a per-computer CPU choice and is not.
+    AxiomAudioProcessor engines;
+    set (engines, "engine", 1.0f);
+    set (engines, "tubeMath", 1.0f);
+    expect (engines.saveUserPreset ("Physical lead").wasOk(), "save a Physical-engine tone");
+    set (engines, "engine", 0.0f);
+    set (engines, "tubeMath", 0.0f);
+    expect (engines.loadUserPreset (folder.getFile().getChildFile ("Physical lead.axiompreset")).wasOk(), "load the Physical-engine tone");
+    expect (value (engines, "engine") >= 0.5f, "a user tone restores the amp engine");
+    expect (value (engines, "tubeMath") < 0.5f, "a user tone leaves tube math alone");
+    expect (files.size() == 1 && engines.loadUserPreset (files[0]).wasOk() && value (engines, "engine") < 0.5f,
+            "a tone saved before the engine choice existed loads on the Standard engine");
+    set (engines, "engine", 1.0f);
+    set (engines, "tubeMath", 1.0f);
+    engines.setCurrentProgram (2);
+    expect (value (engines, "engine") >= 0.5f && value (engines, "tubeMath") >= 0.5f, "factory tones keep the chosen engine and math");
+    expect (value (fromOld, "engine") < 0.5f && value (fromOld, "tubeMath") < 0.5f, "old sessions load on the Standard engine");
+    juce::MemoryBlock engineState;
+    engines.getStateInformation (engineState);
+    AxiomAudioProcessor engineRestored;
+    engineRestored.setStateInformation (engineState.getData(), (int) engineState.getSize());
+    expect (value (engineRestored, "engine") >= 0.5f && value (engineRestored, "tubeMath") >= 0.5f, "a session restores engine and tube math");
 
     folder.getFile().deleteRecursively();
     std::printf ("\n%s\n", failures == 0 ? "All checks passed" : "CHECKS FAILED");

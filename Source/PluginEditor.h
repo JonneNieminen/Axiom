@@ -151,9 +151,11 @@ private:
     AxiomPromptOverlay prompt;
     AxiomSegmented voiceSelector { { "Clean", "Classic", "Modern" }, { 0, 1, 2 } };
     AxiomSegmented themeSelector { { "Dark", "Light" } };
+    AxiomSegmented engineSelector { { "Standard", "Physical" } };
+    AxiomSegmented mathSelector { { "Fast", "Exact" } };
     juce::Array<juce::File> userPresets;
     static constexpr int userPresetBaseId = 1000, savePresetId = 900, deletePresetId = 901, revealPresetsId = 902;
-    juce::Label presetLabel, voiceLabel, sourceLabel, tunerLabel, footnote;
+    juce::Label presetLabel, voiceLabel, sourceLabel, tunerLabel, engineLabel, mathLabel, footnote;
     juce::Label cabinetCaption, referenceStatus;
     juce::Slider gain, bass, middle, treble, presence, master, input, gate, room, boost, chorus, delayMix, delayTime;
     juce::Label gainLabel, bassLabel, middleLabel, trebleLabel, presenceLabel, masterLabel, inputLabel, gateLabel, roomKnobLabel, boostLabel, chorusLabel, delayMixLabel, delayTimeLabel;
@@ -171,7 +173,9 @@ private:
     std::unique_ptr<SliderAttachment> presenceAttachment, masterAttachment, inputAttachment, roomAttachment;
     std::unique_ptr<SliderAttachment> boostAttachment, chorusAttachment, delayMixAttachment, delayTimeAttachment, gateAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment;
-    std::unique_ptr<juce::ParameterAttachment> voiceAttachment;
+    std::unique_ptr<juce::ParameterAttachment> voiceAttachment, engineAttachment, mathAttachment;
+    void bindSegmented (AxiomSegmented&, const char* parameterId, std::unique_ptr<juce::ParameterAttachment>&);
+    void refreshEngineControls();
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> cabinetAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxiomAudioProcessorEditor)

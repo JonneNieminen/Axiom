@@ -1,4 +1,5 @@
 #include "AxiomDsp.h"
+#include "PhysicalTubeStage.h"
 #include <array>
 #include <cmath>
 
@@ -295,6 +296,18 @@ struct AxiomDsp::Impl
     juce::Reverb reverb;
     bool reverbActive = false;
 
+    // Physical engine: its own oversampler (same filters, same latency) and filter states, so
+    // the Standard path above is untouched and the two can run side by side while crossfading.
+    juce::dsp::Oversampling<float> osPhys { 1, 3, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false };
+    physical::PhysicalTubeStage physicalAmp;
+    std::vector<float> monoPhys;
+    juce::SmoothedValue<float> physInput;
+    juce::SmoothedValue<double> engineMix;      // 0 = Standard, 1 = Physical
+    bool stdRunning = true, physRunning = false;
+    OnePole physBoostHp, physBoostLp;
+    Biquad physBass, physMid, physTreble, physPresence;
+    double physBoostNow = 0.0;
+
     AxiomParams last;
     bool haveLast = false;
 
@@ -304,6 +317,11 @@ struct AxiomDsp::Impl
         maxBlock = std::max (blockSize, 32);
         os.initProcessing ((size_t) maxBlock);
         fsOs = fs * 8.0;
+        osPhys.initProcessing ((size_t) maxBlock);
+        monoPhys.assign ((size_t) maxBlock, 0.0f);
+        physInput.reset (fs, 0.04);
+        engineMix.reset (fs, 0.03);
+        physicalAmp.prepare (fsOs);
         mono.assign ((size_t) maxBlock, 0.0f);
         left.assign ((size_t) maxBlock, 0.0f);
         right.assign ((size_t) maxBlock, 0.0f);
@@ -318,6 +336,7 @@ struct AxiomDsp::Impl
         mod.prepare (fs);
         reverb.setSampleRate (fs);
         haveLast = false;
+        engineMixPrimed = false;
         reset();
     }
 
@@ -336,6 +355,27 @@ struct AxiomDsp::Impl
         mod.reset();
         reverb.reset();
         reverbActive = false;
+        resetPhysical();
+    }
+
+    void resetStandard()
+    {
+        os.reset();
+        preHp.reset(); boostHp.reset(); boostLp.reset();
+        emph.reset(); bass.reset(); mid.reset(); treble.reset(); presence.reset();
+        for (auto& f : stageHp) f.reset();
+        for (auto& f : stageLp) f.reset();
+        sagEnv = 0.0;
+        boostNow = boostTarget;
+    }
+
+    void resetPhysical()
+    {
+        osPhys.reset();
+        physicalAmp.reset();
+        physBoostHp.reset(); physBoostLp.reset();
+        physBass.reset(); physMid.reset(); physTreble.reset(); physPresence.reset();
+        physBoostNow = boostTarget;
     }
 
     static constexpr int eqStep = 32;  // oversampled samples between tone-stack updates
@@ -347,6 +387,10 @@ struct AxiomDsp::Impl
         mid.set (peak (fsOs, v.midHz, v.midQ, eqNow[1]));
         treble.set (highShelf (fsOs, v.trebleHz, 0.7, eqNow[2]));
         presence.set (highShelf (fsOs, v.presenceHz, 0.7, eqNow[3]));
+        physBass.set (lowShelf (fsOs, v.bassHz, 0.7, eqNow[0]));
+        physMid.set (peak (fsOs, v.midHz, v.midQ, eqNow[1]));
+        physTreble.set (highShelf (fsOs, v.trebleHz, 0.7, eqNow[2]));
+        physPresence.set (highShelf (fsOs, v.presenceHz, 0.7, eqNow[3]));
     }
 
     void stepEq()
@@ -371,6 +415,9 @@ struct AxiomDsp::Impl
         preHp.setHighPass (fsOs, v.preHpHz);
         boostHp.setHighPass (fsOs, 720.0);
         boostLp.setLowPass (fsOs, 4200.0);
+        physBoostHp.setHighPass (fsOs, 720.0);
+        physBoostLp.setLowPass (fsOs, 4200.0);
+        physicalAmp.setVoice (p.voice);
         emph.set (highShelf (fsOs, v.emphHz, 0.7, v.emphDb));
         stages = v.stages;
         for (int i = 0; i < 3; ++i)
@@ -422,6 +469,17 @@ struct AxiomDsp::Impl
         const double driveDb = v.driveLoDb + (v.driveHiDb - v.driveLoDb) * knob;
         inputGain = dbToLin (p.inputDb);
         drive.setTargetValue ((float) (dbToLin (driveDb) * inputGain));
+        physInput.setTargetValue ((float) inputGain);
+        physicalAmp.setGain (knob);
+        physicalAmp.setMathMode (p.tubeMath == 1 ? physical::MathMode::exact : physical::MathMode::fast);
+        engineMix.setTargetValue (p.engine == 1 ? 1.0 : 0.0);
+        if (! engineMixPrimed)
+        {
+            // A session that opens on the Physical engine starts there, without a fade.
+            engineMix.setCurrentAndTargetValue (p.engine == 1 ? 1.0 : 0.0);
+            physInput.setCurrentAndTargetValue ((float) inputGain);
+            engineMixPrimed = true;
+        }
         gateOpenLevel = p.gateDb > gateOffDb ? dbToLin (juce::jlimit (-80.0, 0.0, (double) p.gateDb)) : 0.0;
         master.setTargetValue ((float) dbToLin (p.masterDb));
         room.setTargetValue (p.room * 0.01f);
@@ -462,6 +520,37 @@ struct AxiomDsp::Impl
         return x * outGain;
     }
 
+    bool engineMixPrimed = false;
+
+    /** The boost pedal for the Physical engine: the same mid-focused filter, but clean. The
+        tubes behind it do the clipping, as they would with a real clean boost. */
+    double physBoost (double x)
+    {
+        physBoostNow += (boostTarget - physBoostNow) * boostCoef;
+        const double b = physBoostNow;
+        const double hp = physBoostHp.process (x);
+        const double mids = physBoostLp.process (x + hp * 1.4);
+        return x * (1.0 - b) + mids * b * (1.0 + 4.0 * b);
+    }
+
+    /** One oversampled block through the Physical engine, in place. */
+    void processPhysical (float* u, size_t numSamples, bool steppingEq)
+    {
+        const auto tone = [this] (double v) { return physTreble.process (physMid.process (physBass.process (v))); };
+        for (size_t k = 0; k < numSamples; k += (size_t) eqStep)
+        {
+            if (steppingEq)
+                stepEq();
+            const int len = (int) std::min ((size_t) eqStep, numSamples - k);
+            float* chunk = u + k;
+            for (int j = 0; j < len; ++j)
+                chunk[j] = (float) physBoost ((double) chunk[j]);
+            physicalAmp.process (chunk, len, tone);
+            for (int j = 0; j < len; ++j)
+                chunk[j] = (float) physPresence.process ((double) chunk[j]);
+        }
+    }
+
     double cabSample (double x)
     {
         for (int i = 0; i < cabCount; ++i)
@@ -480,24 +569,61 @@ struct AxiomDsp::Impl
             const float* l = inL + start;
             const float* r = inR != nullptr ? inR + start : inL + start;
 
+            // Which engines run: the selected one, plus the other while the crossfade lasts.
+            const bool wantPhysical = engineMix.getTargetValue() > 0.5;
+            const bool fading = engineMix.isSmoothing();
+            const bool runStd = ! wantPhysical || fading;
+            const bool runPhys = wantPhysical || fading;
+            if (runStd && ! stdRunning)
+                resetStandard();
+            if (runPhys && ! physRunning)
+                resetPhysical();
+            stdRunning = runStd;
+            physRunning = runPhys;
+
             for (int i = 0; i < n; ++i)
             {
                 const float src = p.source == 1 ? r[i] : (p.source == 2 ? 0.5f * (l[i] + r[i]) : l[i]);
                 const double open = gate.process ((double) src * inputGain, gateOpenLevel);
-                mono[(size_t) i] = (float) (src * open) * drive.getNextValue();
+                const float gated = (float) (src * open);
+                mono[(size_t) i] = gated * drive.getNextValue();
+                monoPhys[(size_t) i] = gated * physInput.getNextValue();
             }
 
-            float* channels[1] { mono.data() };
-            juce::dsp::AudioBlock<float> block (channels, 1, (size_t) n);
-            auto up = os.processSamplesUp (block);
-            float* u = up.getChannelPointer (0);
-            for (size_t k = 0; k < up.getNumSamples(); ++k)
+            if (runStd)
             {
-                if (k % (size_t) eqStep == 0)
-                    stepEq();
-                u[k] = (float) ampSample ((double) u[k]);
+                float* channels[1] { mono.data() };
+                juce::dsp::AudioBlock<float> block (channels, 1, (size_t) n);
+                auto up = os.processSamplesUp (block);
+                float* u = up.getChannelPointer (0);
+                for (size_t k = 0; k < up.getNumSamples(); ++k)
+                {
+                    if (k % (size_t) eqStep == 0)
+                        stepEq();
+                    u[k] = (float) ampSample ((double) u[k]);
+                }
+                os.processSamplesDown (block);
             }
-            os.processSamplesDown (block);
+
+            if (runPhys)
+            {
+                float* channels[1] { monoPhys.data() };
+                juce::dsp::AudioBlock<float> block (channels, 1, (size_t) n);
+                auto up = osPhys.processSamplesUp (block);
+                processPhysical (up.getChannelPointer (0), up.getNumSamples(), ! runStd);
+                osPhys.processSamplesDown (block);
+
+                if (runStd)
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const auto m = (float) engineMix.getNextValue();
+                        mono[(size_t) i] = mono[(size_t) i] * (1.0f - m) + monoPhys[(size_t) i] * m;
+                    }
+                else
+                    std::copy (monoPhys.begin(), monoPhys.begin() + n, mono.begin());
+            }
+            if (! (runStd && runPhys))
+                engineMix.skip (n);
 
             for (int i = 0; i < n; ++i)
                 mono[(size_t) i] = softLimit ((float) cabSample ((double) mono[(size_t) i]) * master.getNextValue());

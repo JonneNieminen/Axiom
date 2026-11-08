@@ -23,6 +23,8 @@ struct AxiomParams
     float delayMs = 380.0f;
     bool cabinet = true;
     float gateDb = -80.0f;  // noise gate threshold; at or below gateOffDb the gate is off
+    int engine = 0;         // 0 Standard (waveshaper stages), 1 Physical (component-level tube model)
+    int tubeMath = 0;       // Physical engine only: 0 Fast (polynomial math), 1 Exact (libm)
 };
 
 /** Gate thresholds at or below this are treated as "Off". */
@@ -31,6 +33,10 @@ constexpr float gateOffDb = -79.5f;
 /**
     Guitar amp signal path: mono input -> noise gate -> boost -> oversampled tube-style preamp
     -> tone stack -> power amp with sag -> cabinet -> chorus / delay -> stereo room.
+
+    Two amp engines share everything outside the 8x oversampled section. Standard is the
+    original cascade of asymmetric saturators. Physical (PhysicalTubeStage.h) solves the
+    12AX7 stages, power supply and push-pull power amp as circuits. Switching crossfades.
 
     The amp is mono, as a real one is: the selected input is processed once and
     fed to both outputs, so a single-input audio interface sounds centred.

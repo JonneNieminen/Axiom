@@ -4,9 +4,9 @@ This file is the shared source of project guidance for coding agents. Provider-s
 
 ## Project
 
-- JUCE 9.0.5+ and C++17 guitar amplifier effect.
+- JUCE 9.0.5+ and C++20 guitar amplifier effect.
 - macOS formats: VST3 and AU. CMake owns the build.
-- `Source/AxiomDsp.*`: the signal path (no JUCE plugin types, so `tools/render` can use it). `Source/Presets.h`: factory tones. `Source/PluginProcessor.*`: parameters, presets as programs and state. `Source/PluginEditor.*`: UI, tuner display and reference analysis. `Source/PitchDetector.h`: YIN pitch detection for the tuner (message thread only). `Source/DesignTokens.h`: the Ember palette (dark + light) and logo geometry; colours only come from `axiom::theme::current()`; the logo masters are `design/logo/make.py`.
+- `Source/AxiomDsp.*`: the signal path (no JUCE plugin types, so `tools/render` can use it). `Source/PhysicalTubeStage.*`: the optional Physical engine (circuit-level tubes, supply and power amp; JUCE-free). The Standard engine's output must stay bit-identical when the Physical one changes; `docs/PHYSICAL_ENGINE.md` explains the model. `Source/Presets.h`: factory tones. `Source/PluginProcessor.*`: parameters, presets as programs and state. `Source/PluginEditor.*`: UI, tuner display and reference analysis. `Source/PitchDetector.h`: YIN pitch detection for the tuner (message thread only). `Source/DesignTokens.h`: the Ember palette (dark + light) and logo geometry; colours only come from `axiom::theme::current()`; the logo masters are `design/logo/make.py`.
 - Tone Match is a local spectral-profile suggestion tool. It is not a model that clones a full recording chain.
 
 ## Rules
