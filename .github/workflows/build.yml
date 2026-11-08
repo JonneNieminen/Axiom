@@ -58,6 +58,13 @@ jobs:
           codesign --verify --deep --strict build/Axiom_artefacts/Release/Standalone/Axiom.app
           codesign --verify --deep --strict build/Axiom_artefacts/Release/VST3/Axiom.vst3
           codesign --verify --deep --strict build/Axiom_artefacts/Release/AU/Axiom.component
+      - name: Validate the Audio Unit (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/Axiom_artefacts/Release/AU/Axiom.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -strict -v aufx AXM1 AXIO
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v7
         with:

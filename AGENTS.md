@@ -24,4 +24,4 @@ This file is the shared source of project guidance for coding agents. Provider-s
 
 ## Build
 
-Follow `README.md` to fetch JUCE and build both macOS targets. After DSP changes also run `axiom-render` (configure with `-DAXIOM_BUILD_TOOLS=ON`) and check levels, aliasing and the checks-passed line. After UI changes regenerate `docs/screenshots/amp.png` with `AxiomSnapshot` (same option) and look at it. At minimum, after code changes, build `Axiom_VST3` and `Axiom_AU`, then run `git diff --check`. Do not claim host compatibility beyond formats actually built or checked.
+Follow `README.md` to fetch JUCE and build both macOS targets. After DSP changes also run `axiom-render` (configure with `-DAXIOM_BUILD_TOOLS=ON`) and check levels, aliasing and the checks-passed line. After UI changes regenerate `docs/screenshots/amp.png` with `AxiomSnapshot` (same option) and look at it. At minimum, after code changes, build `Axiom_VST3` and `Axiom_AU`, then run `git diff --check`. CI also runs `auval -strict` on the Audio Unit. Do not claim host compatibility beyond formats actually built or checked.
