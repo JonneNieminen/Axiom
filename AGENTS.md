@@ -15,6 +15,8 @@ This file is the shared source of project guidance for coding agents. Provider-s
 - Keep reference-file reading and FFT analysis on the worker thread. Use bounded input and safe message-thread callbacks.
 - Change parameters through host-aware APIs. Preserve parameter IDs and their meanings for existing sessions. A new parameter's default must leave old sessions sounding the same (the gate defaults to Off).
 - The tuner only copies input samples in `processBlock`; pitch detection runs in the editor timer.
+- User presets are XML files in `AxiomAudioProcessor::userPresetFolder()` (`AXIOM_PRESET_DIR` overrides it for tests); they never store `inputSource`. Dialogs are drawn inside the editor (`AxiomPromptOverlay`), not as separate windows.
+- After processor or preset changes run `AxiomSnapshot --check`.
 - Treat input files as local reference material; do not upload, persist, or embed them.
 - Preserve mono/stereo support and sample-rate safety.
 - Keep the UI palette centralized, the SVG assets original, and README/docs accurate.

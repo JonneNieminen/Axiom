@@ -144,6 +144,18 @@ void AxiomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float* inL = buffer.getReadPointer (0);
     const float* inR = channels > 1 ? buffer.getReadPointer (1) : nullptr;
 
+    {
+        const float trim = juce::Decibels::decibelsToGain (params.inputDb);
+        float in = 0.0f;
+        for (int i = 0; i < samples; ++i)
+        {
+            const float r = inR != nullptr ? inR[i] : inL[i];
+            const float src = params.source == 1 ? r : (params.source == 2 ? 0.5f * (inL[i] + r) : inL[i]);
+            in = juce::jmax (in, std::abs (src));
+        }
+        inputPeak.store (juce::jmax (in * trim, inputPeak.load (std::memory_order_relaxed) * 0.88f), std::memory_order_relaxed);
+    }
+
     const bool tuning = tunerActive.load (std::memory_order_relaxed);
     if (tuning)
     {
@@ -201,6 +213,97 @@ void AxiomAudioProcessor::setCurrentProgram (int index)
     applyingPreset = false;
     currentPreset.store (index);
     presetModified.store (false);
+    setUserPresetName ({});
+}
+
+juce::File AxiomAudioProcessor::userPresetFolder()
+{
+    // Tests point this somewhere temporary so they never touch your real presets.
+    const auto overridden = juce::SystemStats::getEnvironmentVariable ("AXIOM_PRESET_DIR", {});
+    if (overridden.isNotEmpty())
+        return juce::File (overridden);
+   #if JUCE_MAC
+    return juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Library/Audio/Presets/Axiom");
+   #else
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Axiom/Presets");
+   #endif
+}
+
+juce::Array<juce::File> AxiomAudioProcessor::getUserPresetFiles() const
+{
+    auto files = userPresetFolder().findChildFiles (juce::File::findFiles, false, juce::String ("*") + userPresetExtension);
+    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b)
+    {
+        return a.getFileNameWithoutExtension().compareNatural (b.getFileNameWithoutExtension()) < 0;
+    });
+    return files;
+}
+
+juce::Result AxiomAudioProcessor::saveUserPreset (const juce::String& rawName)
+{
+    const auto name = juce::File::createLegalFileName (rawName.trim()).trim();
+    if (name.isEmpty())
+        return juce::Result::fail ("Give the tone a name.");
+
+    juce::XmlElement xml ("AxiomPreset");
+    xml.setAttribute ("name", name);
+    xml.setAttribute ("version", 1);
+    for (auto* parameter : getParameters())
+        if (auto* withId = dynamic_cast<juce::RangedAudioParameter*> (parameter))
+            if (withId->paramID != sourceId)  // the input channel is hardware, not tone
+            {
+                auto* e = xml.createNewChildElement ("param");
+                e->setAttribute ("id", withId->paramID);
+                e->setAttribute ("value", (double) withId->convertFrom0to1 (withId->getValue()));
+            }
+
+    const auto folder = userPresetFolder();
+    if (! folder.createDirectory())
+        return juce::Result::fail ("Axiom couldn't create " + folder.getFullPathName());
+    const auto file = folder.getChildFile (name + userPresetExtension);
+    if (! xml.writeTo (file))
+        return juce::Result::fail ("Axiom couldn't write " + file.getFullPathName());
+
+    setUserPresetName (name);
+    presetModified.store (false);
+    return juce::Result::ok();
+}
+
+juce::Result AxiomAudioProcessor::loadUserPreset (const juce::File& file)
+{
+    const auto xml = juce::XmlDocument::parse (file);
+    if (xml == nullptr || ! xml->hasTagName ("AxiomPreset"))
+        return juce::Result::fail ("That preset file couldn't be read.");
+
+    applyingPreset = true;
+    for (auto* parameter : getParameters())
+        if (auto* withId = dynamic_cast<juce::RangedAudioParameter*> (parameter))
+        {
+            if (withId->paramID == sourceId)
+                continue;
+            // A control the preset doesn't know (saved by an older Axiom) goes to its default.
+            float normalised = withId->getDefaultValue();
+            for (auto* e : xml->getChildWithTagNameIterator ("param"))
+                if (e->getStringAttribute ("id") == withId->paramID)
+                    normalised = withId->convertTo0to1 ((float) e->getDoubleAttribute ("value"));
+            withId->setValueNotifyingHost (normalised);
+        }
+    applyingPreset = false;
+    setUserPresetName (file.getFileNameWithoutExtension());
+    presetModified.store (false);
+    return juce::Result::ok();
+}
+
+juce::String AxiomAudioProcessor::getUserPresetName() const
+{
+    const juce::ScopedLock lock (userPresetLock);
+    return userPresetName;
+}
+
+void AxiomAudioProcessor::setUserPresetName (const juce::String& name)
+{
+    const juce::ScopedLock lock (userPresetLock);
+    userPresetName = name;
 }
 
 double AxiomAudioProcessor::readTunerInput (float* dest, int count) const
@@ -222,6 +325,7 @@ void AxiomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto state = parameters.copyState();
     state.setProperty ("preset", currentPreset.load(), nullptr);
     state.setProperty ("presetModified", presetModified.load(), nullptr);
+    state.setProperty ("userPreset", getUserPresetName(), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, dest);
 }
@@ -237,6 +341,7 @@ void AxiomAudioProcessor::setStateInformation (const void* data, int size)
         parameters.replaceState (state);
         applyingPreset = false;
         presetModified.store ((bool) state.getProperty ("presetModified", ! state.hasProperty ("preset")));
+        setUserPresetName (state.getProperty ("userPreset", juce::String()).toString());
     }
 }
 

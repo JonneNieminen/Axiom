@@ -34,6 +34,8 @@ public:
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float> outputPeak { 0.0f };
+    /** Peak of the guitar input after Input trim, i.e. what hits the preamp. */
+    std::atomic<float> inputPeak { 0.0f };
     /** True once any control differs from the loaded preset. */
     std::atomic<bool> presetModified { false };
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -44,12 +46,25 @@ public:
     /** Copies the newest `count` input samples (oldest first) into dest and returns the sample rate. */
     double readTunerInput (float* dest, int count) const;
 
+    // User presets: one small XML file per tone in userPresetFolder(). Message thread only.
+    static juce::File userPresetFolder();
+    static constexpr const char* userPresetExtension = ".axiompreset";
+    juce::Array<juce::File> getUserPresetFiles() const;
+    /** Saves the current controls under `name` (replacing a preset of the same name). */
+    juce::Result saveUserPreset (const juce::String& name);
+    juce::Result loadUserPreset (const juce::File&);
+    /** The loaded user preset's name, or empty when a factory preset (or nothing) is loaded. */
+    juce::String getUserPresetName() const;
+
 private:
     axiom::AxiomDsp dsp;
     std::atomic<int> currentPreset { 0 };
     axiom::AxiomParams readParameters();
     void parameterChanged (const juce::String&, float) override;
     std::atomic<bool> applyingPreset { false };
+    juce::String userPresetName;
+    mutable juce::CriticalSection userPresetLock;
+    void setUserPresetName (const juce::String&);
     std::array<std::atomic<float>, tunerBufferSize> tunerBuffer {};
     std::atomic<int> tunerWrite { 0 };
     std::atomic<double> currentSampleRate { 44100.0 };

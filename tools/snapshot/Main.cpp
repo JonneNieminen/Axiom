@@ -1,12 +1,88 @@
 // axiom-snapshot: renders the plugin editor to a PNG without a host or a window, for the
 // README screenshot and as a smoke test that the editor builds its UI without crashing.
-// Usage: axiom-snapshot <output.png> [preset-index] [tuner]
-// With "tuner" the tuner is switched on and fed a slightly sharp A string.
+// Usage: axiom-snapshot <output.png> [preset-index] [tuner|save]
+//        axiom-snapshot --check   (user presets and session state)
+// With "tuner" the tuner is switched on and fed a slightly sharp A string; with "save" the
+// Save tone prompt is open.
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include <cstdlib>
+
+namespace
+{
+/** Processor checks that need the plugin's own code: user presets and session state. */
+int runChecks()
+{
+    int failures = 0;
+    const auto expect = [&] (bool ok, const char* what)
+    {
+        std::printf ("%s %s\n", ok ? "ok  " : "FAIL", what);
+        if (! ok) ++failures;
+    };
+    const auto value = [] (AxiomAudioProcessor& p, const char* id)
+    {
+        auto* param = p.parameters.getParameter (id);
+        return param->convertFrom0to1 (param->getValue());
+    };
+    const auto set = [] (AxiomAudioProcessor& p, const char* id, float v)
+    {
+        auto* param = p.parameters.getParameter (id);
+        param->setValueNotifyingHost (param->convertTo0to1 (v));
+    };
+
+    juce::TemporaryFile folder;
+    folder.getFile().createDirectory();
+    setenv ("AXIOM_PRESET_DIR", folder.getFile().getFullPathName().toRawUTF8(), 1);
+
+    AxiomAudioProcessor processor;
+    processor.setCurrentProgram (1);
+    expect (! processor.presetModified.load(), "loading a factory tone is not a modification");
+    set (processor, "gain", 4.2f);
+    expect (processor.presetModified.load(), "moving a control marks the tone modified");
+    set (processor, "inputSource", 1.0f);
+    expect (processor.saveUserPreset ("Lead: Big/Fat").wasOk(), "save a user tone");
+    const auto files = processor.getUserPresetFiles();
+    expect (files.size() == 1, "the saved tone is listed");
+    expect (processor.getUserPresetName().isNotEmpty() && ! processor.presetModified.load(), "the saved tone is now the current one");
+
+    set (processor, "gain", 9.0f);
+    set (processor, "inputSource", 2.0f);
+    expect (files.size() == 1 && processor.loadUserPreset (files[0]).wasOk(), "load it back");
+    expect (std::abs (value (processor, "gain") - 4.2f) < 0.01f, "gain restored");
+    expect (std::abs (value (processor, "inputSource") - 2.0f) < 0.01f, "input channel is left alone");
+
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+    AxiomAudioProcessor restored;
+    restored.setStateInformation (state.getData(), (int) state.getSize());
+    expect (restored.getUserPresetName() == processor.getUserPresetName(), "a session remembers the user tone");
+    expect (std::abs (value (restored, "gain") - 4.2f) < 0.01f && std::abs (value (restored, "gate") - value (processor, "gate")) < 0.01f,
+            "a session restores the controls");
+
+    // A session saved before the gate existed must come back with the gate off.
+    auto old = processor.parameters.copyState();
+    old.removeChild (old.getChildWithProperty ("id", "gate"), nullptr);
+    juce::MemoryBlock oldState;
+    AxiomAudioProcessor::copyXmlToBinary (*old.createXml(), oldState);
+    AxiomAudioProcessor fromOld;
+    set (fromOld, "gate", -50.0f);
+    fromOld.setStateInformation (oldState.getData(), (int) oldState.getSize());
+    expect (value (fromOld, "gate") <= axiom::gateOffDb, "old sessions load with the gate off");
+
+    folder.getFile().deleteRecursively();
+    std::printf ("\n%s\n", failures == 0 ? "All checks passed" : "CHECKS FAILED");
+    return failures == 0 ? 0 : 1;
+}
+}
 
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--check")
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        return runChecks();
+    }
+
     if (argc < 2)
     {
         std::printf ("Usage: axiom-snapshot <output.png> [preset-index]\n");
@@ -41,6 +117,10 @@ int main (int argc, char** argv)
             if (auto* tuner = dynamic_cast<AxiomTunerDisplay*> (child))
                 tuner->update();
     }
+    if (argc > 3 && juce::String (argv[3]) == "save")
+        if (auto* menu = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("preset")))
+            menu->setSelectedId (900, juce::sendNotificationSync);
+
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
 
     const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (argv[1]);

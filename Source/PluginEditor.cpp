@@ -48,6 +48,12 @@ AxiomLookAndFeel::AxiomLookAndFeel()
     setColour (juce::PopupMenu::textColourId, cream);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, amberSoft);
     setColour (juce::PopupMenu::highlightedTextColourId, amber);
+    setColour (juce::TextEditor::backgroundColourId, surface);
+    setColour (juce::TextEditor::textColourId, cream);
+    setColour (juce::TextEditor::outlineColourId, border);
+    setColour (juce::TextEditor::focusedOutlineColourId, amber);
+    setColour (juce::TextEditor::highlightColourId, amberSoft);
+    setColour (juce::CaretComponent::caretColourId, amber);
     setColour (juce::TooltipWindow::backgroundColourId, surfaceHi);
     setColour (juce::TooltipWindow::textColourId, cream);
     setColour (juce::TooltipWindow::outlineColourId, borderHi);
@@ -142,7 +148,7 @@ void AxiomLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& 
 void AxiomLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                               const juce::Colour&, bool highlighted, bool down)
 {
-    const bool primary = button.getComponentID() == "apply-tone";
+    const bool primary = (bool) button.getProperties().getWithDefault ("primary", false);
     auto r = button.getLocalBounds().toFloat().reduced (0.5f);
     auto fill = primary ? amber : raised;
     if (! button.isEnabled())
@@ -159,7 +165,7 @@ void AxiomLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& bu
 
 void AxiomLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool, bool)
 {
-    const bool primary = button.getComponentID() == "apply-tone";
+    const bool primary = (bool) button.getProperties().getWithDefault ("primary", false);
     g.setColour (button.isEnabled() ? (primary ? navy : cream) : muted);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawText (button.getButtonText(), button.getLocalBounds().reduced (8, 0), juce::Justification::centred);
@@ -325,20 +331,16 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     configureSlider (delayTime, delayTimeLabel, "DELAY TIME", "Delay time, 40 ms to 1 s.");
 
     addAndMakeVisible (tuner);
+    addChildComponent (prompt);
 
     configureSectionLabel (presetLabel, "TONE PRESET");
     addAndMakeVisible (presetLabel);
-    for (int i = 0; i < AxiomAudioProcessor::numPresets; ++i)
-        preset.addItem (axiom::factoryPresets[(size_t) i].name, i + 1);
+    preset.setComponentID ("preset");
     preset.setTextWhenNothingSelected ("Custom");
-    preset.setSelectedId (audioProcessor.presetModified.load() ? 0 : audioProcessor.getCurrentProgram() + 1, juce::dontSendNotification);
     preset.setJustificationType (juce::Justification::centredLeft);
-    preset.setTooltip ("Load a starting tone. It sets the voice, gain, EQ and effects; every control stays adjustable.");
-    preset.onChange = [this]
-    {
-        if (preset.getSelectedId() > 0)
-            audioProcessor.setCurrentProgram (preset.getSelectedId() - 1);
-    };
+    preset.setTooltip ("Load a starting tone, or save your own. A preset sets the voice, gain, EQ and effects; every control stays adjustable.");
+    rebuildPresetMenu();
+    preset.onChange = [this] { presetMenuChanged(); };
     addAndMakeVisible (preset);
 
     configureSectionLabel (sourceLabel, "INPUT");
@@ -388,6 +390,7 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
     addAndMakeVisible (chooseReferenceButton);
 
     applyToneButton.setComponentID ("apply-tone");
+    applyToneButton.getProperties().set ("primary", true);
     applyToneButton.setTooltip ("Apply the suggested amp voice, gain, and EQ. Other controls stay as they are.");
     applyToneButton.onClick = [this] { applyToneSuggestion(); };
     applyToneButton.setEnabled (false);
@@ -480,36 +483,40 @@ void AxiomAudioProcessorEditor::drawBrandMark (juce::Graphics& g, juce::Rectangl
     g.strokePath (ampA, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
-void AxiomAudioProcessorEditor::drawOutputMeter (juce::Graphics& g, juce::Rectangle<float> r)
+void AxiomAudioProcessorEditor::drawLevelMeters (juce::Graphics& g, juce::Rectangle<float> r)
 {
     g.setColour (panel);
     g.fillRoundedRectangle (r, 12.0f);
     g.setColour (border);
     g.drawRoundedRectangle (r, 12.0f, 1.0f);
-    g.setColour (muted);
-    g.setFont (juce::Font (juce::FontOptions (9.0f, juce::Font::bold)));
-    g.drawText ("OUTPUT", (int) r.getX() + 12, (int) r.getY() + 7, 60, 14, juce::Justification::centredLeft);
 
-    const float peak = audioProcessor.outputPeak.load (std::memory_order_relaxed);
-    const float db = juce::Decibels::gainToDecibels (peak, -60.0f);
-    const float level = juce::jlimit (0.0f, 1.0f, (db + 42.0f) / 42.0f);
-    const auto bar = juce::Rectangle<float> (r.getX() + 12.0f, r.getY() + 27.0f, r.getWidth() - 48.0f, 8.0f);
-    g.setColour (raised);
-    g.fillRoundedRectangle (bar, 4.0f);
-    auto activeBar = bar.withWidth (bar.getWidth() * level);
-    g.setColour (amber);
-    g.fillRoundedRectangle (activeBar, 4.0f);
-    if (level > 0.02f)
+    // IN: what hits the preamp (aim for the amber zone with Input trim). OUT: after everything.
+    const auto row = [&] (const char* name, float peak, float y, bool showSweetSpot)
     {
-        g.setColour (juce::Colour (0x40ffc857));
-        g.fillRoundedRectangle (activeBar.expanded (2.0f, 3.0f), 5.0f);
-        g.setColour (amber);
-        g.fillRoundedRectangle (activeBar, 4.0f);
-    }
-    g.setColour (secondary);
-    g.setFont (juce::Font (juce::FontOptions (9.0f)));
-    g.drawText (juce::String (db <= -59.5f ? -60.0f : db, 0) + " dB",
-                (int) r.getRight() - 39, (int) r.getY() + 23, 33, 16, juce::Justification::centredRight);
+        const float db = juce::Decibels::gainToDecibels (peak, -60.0f);
+        const float level = juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 48.0f);
+        g.setColour (muted);
+        g.setFont (juce::Font (juce::FontOptions (9.0f, juce::Font::bold)));
+        g.drawText (name, (int) r.getX() + 12, (int) y - 6, 30, 12, juce::Justification::centredLeft);
+        const auto bar = juce::Rectangle<float> (r.getX() + 42.0f, y - 3.0f, r.getWidth() - 42.0f - 46.0f, 6.0f);
+        g.setColour (raised);
+        g.fillRoundedRectangle (bar, 3.0f);
+        if (showSweetSpot)
+        {
+            // -18 to -6 dBFS: a healthy guitar level into the amp.
+            const float a = (48.0f - 18.0f) / 48.0f, b = (48.0f - 6.0f) / 48.0f;
+            g.setColour (amberSoft);
+            g.fillRect (bar.getX() + bar.getWidth() * a, bar.getY(), bar.getWidth() * (b - a), bar.getHeight());
+        }
+        g.setColour (db > -1.0f ? juce::Colour (0xffff9f43) : amber);
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * level), 3.0f);
+        g.setColour (secondary);
+        g.setFont (juce::Font (juce::FontOptions (9.0f)));
+        g.drawText (juce::String (db <= -59.5f ? -60.0f : db, 0) + " dB",
+                    (int) r.getRight() - 44, (int) y - 7, 34, 14, juce::Justification::centredRight);
+    };
+    row ("IN", audioProcessor.inputPeak.load (std::memory_order_relaxed), r.getY() + 16.0f, true);
+    row ("OUT", audioProcessor.outputPeak.load (std::memory_order_relaxed), r.getY() + 33.0f, false);
 }
 
 void AxiomAudioProcessorEditor::paint (juce::Graphics& g)
@@ -533,7 +540,7 @@ void AxiomAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillRoundedRectangle (ampCard.getX() + 18.0f, ampCard.getY() + 18.0f, 3.0f, 35.0f, 1.5f);
     g.setColour (border);
     g.drawLine (ampCard.getX() + 24.0f, ampCard.getY() + 65.0f, ampCard.getRight() - 24.0f, ampCard.getY() + 65.0f, 1.0f);
-    drawOutputMeter (g, meterArea());
+    drawLevelMeters (g, meterArea());
 
     auto controlsCard = juce::Rectangle<float> (36.0f, 462.0f, (float) getWidth() - 72.0f, 150.0f);
     g.setColour (panel);
@@ -597,6 +604,7 @@ void AxiomAudioProcessorEditor::resized()
         extraLabels[i]->setBounds (x, 474, pitch - 2, 14);
         extras[i]->setBounds (x, 491, pitch - 2, 117);
     }
+    prompt.setBounds (getLocalBounds());
     cabinet.setBounds (cabinetX, 496, 176, 44);
     cabinetCaption.setBounds (cabinetX + 11, 548, 165, 16);
 
@@ -605,6 +613,225 @@ void AxiomAudioProcessorEditor::resized()
     referenceStatus.setBounds (350, 645, w - 350 - 345, 76);
     chooseReferenceButton.setBounds (w - 326, 656, 142, 46);
     applyToneButton.setBounds (w - 173, 656, 118, 46);
+}
+
+void AxiomAudioProcessorEditor::rebuildPresetMenu()
+{
+    userPresets = audioProcessor.getUserPresetFiles();
+    preset.clear (juce::dontSendNotification);
+    preset.addSectionHeading ("Factory tones");
+    for (int i = 0; i < AxiomAudioProcessor::numPresets; ++i)
+        preset.addItem (axiom::factoryPresets[(size_t) i].name, i + 1);
+    if (! userPresets.isEmpty())
+    {
+        preset.addSeparator();
+        preset.addSectionHeading ("Your tones");
+        for (int i = 0; i < userPresets.size(); ++i)
+            preset.addItem (userPresets[i].getFileNameWithoutExtension(), userPresetBaseId + i);
+    }
+    preset.addSeparator();
+    preset.addItem (juce::String::fromUTF8 ("Save current tone\xe2\x80\xa6"), savePresetId);
+    const auto current = audioProcessor.getUserPresetName();
+    if (current.isNotEmpty() && ! audioProcessor.presetModified.load())
+        preset.addItem (juce::String::fromUTF8 ("Delete \xe2\x80\x9c") + current + juce::String::fromUTF8 ("\xe2\x80\x9d\xe2\x80\xa6"), deletePresetId);
+    preset.addItem ("Show presets folder", revealPresetsId);
+    syncPresetSelection();
+}
+
+void AxiomAudioProcessorEditor::syncPresetSelection()
+{
+    int selected = 0;
+    if (! audioProcessor.presetModified.load())
+    {
+        const auto user = audioProcessor.getUserPresetName();
+        if (user.isEmpty())
+            selected = audioProcessor.getCurrentProgram() + 1;
+        else
+            for (int i = 0; i < userPresets.size(); ++i)
+                if (userPresets[i].getFileNameWithoutExtension() == user)
+                    selected = userPresetBaseId + i;
+    }
+    if (preset.getSelectedId() != selected)
+        preset.setSelectedId (selected, juce::dontSendNotification);
+    // The "Delete" entry only exists while an unmodified user tone is loaded.
+    const bool wantsDelete = audioProcessor.getUserPresetName().isNotEmpty() && ! audioProcessor.presetModified.load();
+    if (wantsDelete != (preset.indexOfItemId (deletePresetId) >= 0) && ! preset.isPopupActive())
+        rebuildPresetMenu();
+}
+
+void AxiomAudioProcessorEditor::presetMenuChanged()
+{
+    const int id = preset.getSelectedId();
+    if (id >= 1 && id <= AxiomAudioProcessor::numPresets)
+    {
+        audioProcessor.setCurrentProgram (id - 1);
+    }
+    else if (id >= userPresetBaseId && id - userPresetBaseId < userPresets.size())
+    {
+        const auto result = audioProcessor.loadUserPreset (userPresets[id - userPresetBaseId]);
+        if (result.failed())
+            prompt.show ("Couldn't load tone", result.getErrorMessage(), "OK", false, {}, {});
+    }
+    else if (id == savePresetId)
+    {
+        promptSavePreset();
+    }
+    else if (id == deletePresetId)
+    {
+        promptDeletePreset();
+    }
+    else if (id == revealPresetsId)
+    {
+        const auto folder = AxiomAudioProcessor::userPresetFolder();
+        folder.createDirectory();
+        folder.revealToUser();
+    }
+    rebuildPresetMenu();
+}
+
+void AxiomAudioProcessorEditor::promptSavePreset()
+{
+    auto name = audioProcessor.getUserPresetName();
+    if (name.isEmpty())
+        name = audioProcessor.presetModified.load() ? juce::String ("My tone")
+                                                    : juce::String (axiom::factoryPresets[(size_t) audioProcessor.getCurrentProgram()].name) + " (mine)";
+    auto safe = juce::Component::SafePointer<AxiomAudioProcessorEditor> (this);
+    prompt.show ("Save tone", "Your tones appear under Tone Preset in every session. Using an existing name replaces it.",
+                 "Save", true, name, [safe] (const juce::String& entered)
+    {
+        if (safe == nullptr)
+            return;
+        const auto result = safe->audioProcessor.saveUserPreset (entered);
+        if (result.failed())
+            safe->prompt.show ("Couldn't save tone", result.getErrorMessage(), "OK", false, {}, {});
+        safe->rebuildPresetMenu();
+    });
+}
+
+void AxiomAudioProcessorEditor::promptDeletePreset()
+{
+    const auto name = audioProcessor.getUserPresetName();
+    const auto file = AxiomAudioProcessor::userPresetFolder().getChildFile (name + AxiomAudioProcessor::userPresetExtension);
+    auto safe = juce::Component::SafePointer<AxiomAudioProcessorEditor> (this);
+    prompt.show ("Delete tone", juce::String::fromUTF8 ("\xe2\x80\x9c") + name + juce::String::fromUTF8 ("\xe2\x80\x9d will move to the Trash. The sound you hear stays as it is."),
+                 "Delete", false, {}, [safe, file] (const juce::String&)
+    {
+        if (safe == nullptr)
+            return;
+        if (file.existsAsFile() && ! file.moveToTrash())
+            file.deleteFile();
+        safe->audioProcessor.presetModified.store (true);
+        safe->rebuildPresetMenu();
+    });
+}
+
+AxiomPromptOverlay::AxiomPromptOverlay()
+{
+    setWantsKeyboardFocus (true);
+    title.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
+    title.setColour (juce::Label::textColourId, cream);
+    message.setFont (juce::Font (juce::FontOptions (12.0f)));
+    message.setColour (juce::Label::textColourId, secondary);
+    message.setJustificationType (juce::Justification::topLeft);
+    message.setMinimumHorizontalScale (1.0f);
+    field.setFont (juce::Font (juce::FontOptions (14.0f)));
+    field.setIndents (10, 8);
+    field.onReturnKey = [this] { confirm(); };
+    field.onEscapeKey = [this] { dismiss(); };
+    confirmButton.getProperties().set ("primary", true);
+    confirmButton.onClick = [this] { confirm(); };
+    cancelButton.onClick = [this] { dismiss(); };
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &message, &field, &confirmButton, &cancelButton })
+        addAndMakeVisible (c);
+}
+
+void AxiomPromptOverlay::show (const juce::String& heading, const juce::String& text, const juce::String& confirmLabel,
+                               bool withField, const juce::String& fieldText, std::function<void (const juce::String&)> onConfirm)
+{
+    title.setText (heading, juce::dontSendNotification);
+    message.setText (text, juce::dontSendNotification);
+    confirmButton.setButtonText (confirmLabel);
+    hasField = withField;
+    field.setVisible (withField);
+    field.setText (fieldText, false);
+    callback = std::move (onConfirm);
+    cancelButton.setVisible (callback != nullptr);
+    setVisible (true);
+    toFront (true);
+    resized();
+    if (withField)
+    {
+        field.grabKeyboardFocus();
+        field.selectAll();
+    }
+    else
+    {
+        grabKeyboardFocus();
+    }
+}
+
+void AxiomPromptOverlay::dismiss()
+{
+    callback = nullptr;
+    setVisible (false);
+}
+
+void AxiomPromptOverlay::confirm()
+{
+    auto cb = std::move (callback);
+    const auto text = field.getText();
+    setVisible (false);
+    if (cb != nullptr)
+        cb (text);
+}
+
+bool AxiomPromptOverlay::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey)
+    {
+        dismiss();
+        return true;
+    }
+    if (key == juce::KeyPress::returnKey)
+    {
+        confirm();
+        return true;
+    }
+    return true;  // modal: keys never reach the controls underneath
+}
+
+juce::Rectangle<int> AxiomPromptOverlay::card() const
+{
+    return getLocalBounds().withSizeKeepingCentre (420, hasField ? 196 : 152);
+}
+
+void AxiomPromptOverlay::paint (juce::Graphics& g)
+{
+    g.fillAll (background.withAlpha (0.72f));
+    const auto r = card().toFloat();
+    g.setColour (juce::Colour (0x50000000));
+    g.fillRoundedRectangle (r.translated (0.0f, 6.0f).expanded (2.0f), 18.0f);
+    g.setColour (panel);
+    g.fillRoundedRectangle (r, 16.0f);
+    g.setColour (borderHi);
+    g.drawRoundedRectangle (r.reduced (0.5f), 16.0f, 1.0f);
+}
+
+void AxiomPromptOverlay::resized()
+{
+    auto r = card().reduced (24, 20);
+    title.setBounds (r.removeFromTop (22));
+    r.removeFromTop (6);
+    message.setBounds (r.removeFromTop (36));
+    if (hasField)
+    {
+        r.removeFromTop (8);
+        field.setBounds (r.removeFromTop (36));
+    }
+    auto buttons = r.removeFromBottom (36);
+    confirmButton.setBounds (buttons.removeFromRight (110));
+    buttons.removeFromRight (10);
+    cancelButton.setBounds (buttons.removeFromRight (100));
 }
 
 void AxiomAudioProcessorEditor::chooseReferenceFile()
@@ -691,9 +918,7 @@ void AxiomAudioProcessorEditor::applyToneSuggestion()
 
 void AxiomAudioProcessorEditor::timerCallback()
 {
-    const int selected = audioProcessor.presetModified.load() ? 0 : audioProcessor.getCurrentProgram() + 1;
-    if (preset.getSelectedId() != selected)
-        preset.setSelectedId (selected, juce::dontSendNotification);
+    syncPresetSelection();
     tuner.update();
     repaint (meterArea().expanded (2.0f).toNearestInt());
 }

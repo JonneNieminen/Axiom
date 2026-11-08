@@ -39,6 +39,8 @@ jobs:
         run: cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_AU AxiomRender AxiomSnapshot -j 4
       - name: DSP checks
         run: build/AxiomRender_artefacts/Release/AxiomRender
+      - name: Preset and session checks
+        run: build/AxiomSnapshot_artefacts/Release/AxiomSnapshot --check
       - name: Editor smoke test
         run: |
           build/AxiomSnapshot_artefacts/Release/AxiomSnapshot "$RUNNER_TEMP/axiom.png" 1 tuner

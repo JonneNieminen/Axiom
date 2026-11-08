@@ -32,9 +32,11 @@ Everything runs locally.
 
 - **Organic gain staging**: cascaded asymmetric tube-style stages with coupling filters, power-amp sag and 8× oversampling, so overdrive stays smooth, dynamic and free of digital fizz. It cleans up when you roll your guitar volume down.
 - **Three amp voices**: Clean (glassy, lots of headroom), Classic (plexi-style crunch) and Modern (tight, hot-rodded high gain).
+- **Your own tones**: save the current sound from the preset menu and it is there in every session, standalone or in your DAW.
 - **Tone presets**: George Lynch, Van Halen, David Gilmour, Mark Knopfler (clean and Les Paul distorted) and a huge 80s chorus clean. Every control stays adjustable.
 - **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp. Tone knobs glide instead of stepping, so automating them never zips.
 - **Noise gate** in front of the amp that silences hum and hiss between notes without chopping decaying notes. The high-gain presets turn it on.
+- **Input and output meters**, with a marked sweet spot for setting Input trim.
 - **Tuner** in the header: click it, play a string, and it shows the note and how many cents you are off. The output mutes while you tune.
 - **Built-in cabinet**: a 2×12-style speaker response you can switch off.
 - **Effects**: stereo chorus, a darkening stereo delay and a small room reverb.
@@ -75,6 +77,8 @@ Choose a starting tone in **Tone Preset**. The label switches to *Custom* as soo
 | **Mark Knopfler (Les Paul Dist)** | Classic | Mid-forward, nasal crunch with a push from the boost. |
 | **80s Clean (Huge Chorus)** | Clean | Pristine clean with a wide stereo chorus and ambience. |
 
+Choose **Save current tone…** at the bottom of the same menu to keep your own sound; it appears under *Your tones* from then on. Your tones are small files in `~/Library/Audio/Presets/Axiom` (**Show presets folder** opens it), so you can back them up or share them. Saving never changes the Input (left/right) choice, since that belongs to your audio interface.
+
 These tones are inspired by the amps, guitars and pedals behind each sound; they are starting points, not models of any specific rig or recording. Add a guitar-appropriate **Input trim** if your interface is quiet.
 
 ### Shape your tone
@@ -94,7 +98,7 @@ These tones are inspired by the amps, guitars and pedals behind each sound; they
 | **Input** | Choose Left, Right or Left + Right as the guitar source. |
 | **Cabinet Sim** | Engage the internal 2×12-style speaker response. |
 
-Hover any control for a short explanation, and double-click a knob to reset it.
+Hover any control for a short explanation, and double-click a knob to reset it. Set **Input trim** so the **IN** meter peaks in its shaded zone (about −18 to −6 dB) when you play hard.
 
 ### Tune up
 
@@ -126,7 +130,7 @@ cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_
 
 Products appear under `build/Axiom_artefacts/Release/`. Use `x86_64` for Intel or `arm64;x86_64` for a universal binary, add `-DJUCE_DIR=/path/to/JUCE` if JUCE lives elsewhere, or use `-G Xcode` to generate an Xcode project. Open the folder in VS Code with the recommended CMake Tools extension to build from the editor.
 
-Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/amp.png` renders the interface to a PNG without a host (add a preset number, and `tuner` to show the tuner); it is how the README screenshot is made.
+Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/amp.png` renders the interface to a PNG without a host (add a preset number, and `tuner` to show the tuner); it is how the README screenshot is made. `AxiomSnapshot --check` tests user presets and session state.
 
 Build the drag-to-install DMG with `build/macos/make-dmg.sh build/Axiom_artefacts/Release/Standalone/Axiom.app 1.0.0 arm64 dist`.
 

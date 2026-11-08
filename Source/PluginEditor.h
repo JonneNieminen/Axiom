@@ -47,6 +47,29 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxiomTunerDisplay)
 };
 
+/** A small dialog drawn inside the editor (plugin hosts handle separate windows badly):
+    a title, a message, an optional name field and Confirm / Cancel. */
+class AxiomPromptOverlay final : public juce::Component
+{
+public:
+    AxiomPromptOverlay();
+    void show (const juce::String& title, const juce::String& message, const juce::String& confirmLabel,
+               bool withField, const juce::String& fieldText, std::function<void (const juce::String&)> onConfirm);
+    void dismiss();
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+
+private:
+    juce::Rectangle<int> card() const;
+    void confirm();
+    juce::Label title, message;
+    juce::TextEditor field;
+    juce::TextButton confirmButton, cancelButton { "Cancel" };
+    bool hasField = false;
+    std::function<void (const juce::String&)> callback;
+};
+
 class AxiomAudioProcessorEditor final : public juce::AudioProcessorEditor,
                                         private juce::Timer
 {
@@ -62,7 +85,12 @@ private:
     void attach (juce::Slider&, const juce::String& parameterId, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>&);
     void configureSectionLabel (juce::Label&, const juce::String&);
     void drawBrandMark (juce::Graphics&, juce::Rectangle<float>);
-    void drawOutputMeter (juce::Graphics&, juce::Rectangle<float>);
+    void drawLevelMeters (juce::Graphics&, juce::Rectangle<float>);
+    void rebuildPresetMenu();
+    void syncPresetSelection();
+    void presetMenuChanged();
+    void promptSavePreset();
+    void promptDeletePreset();
     juce::Rectangle<float> meterArea() const { return { (float) getWidth() - 240.0f, 38.0f, 188.0f, 48.0f }; }
     void chooseReferenceFile();
     void beginReferenceAnalysis (const juce::File&);
@@ -73,6 +101,9 @@ private:
     AxiomLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltipWindow { this, 650 };
     AxiomTunerDisplay tuner;
+    AxiomPromptOverlay prompt;
+    juce::Array<juce::File> userPresets;
+    static constexpr int userPresetBaseId = 1000, savePresetId = 900, deletePresetId = 901, revealPresetsId = 902;
     juce::Label wordmark, descriptor, ampHeading, ampSubheading, voiceLabel;
     juce::Label presetLabel, sourceLabel;
     juce::Label cabinetCaption, toneMatchHeading, toneMatchDescription, referenceStatus;
