@@ -498,14 +498,15 @@ AxiomAudioProcessorEditor::AxiomAudioProcessorEditor (AxiomAudioProcessor& p)
 
     configureSectionLabel (engineLabel, "AMP ENGINE");
     addAndMakeVisible (engineLabel);
-    engineSelector.setTooltip ("Standard: Axiom's original tube-style stages, light on CPU. Physical: the 12AX7 stages, power supply "
-                               "and push-pull power amp solved as circuits, sample by sample. Physical uses several times more CPU.");
+    engineSelector.setTooltip ("Standard: Axiom's original tube-style stages, light on CPU. Physical: the preamp, phase inverter, "
+                               "power amp and power supply solved as circuits, sample by sample; Gain, Bass, Middle, Treble and "
+                               "Presence then turn the circuit's own pots (0 dB = noon). Physical uses about ten times the CPU.");
     engineSelector.setTitle ("Amp engine");
     addAndMakeVisible (engineSelector);
     configureSectionLabel (mathLabel, "TUBE MATH");
     addAndMakeVisible (mathLabel);
-    mathSelector.setTooltip ("Physical engine only. Fast: table-based exp/log, at most 4 solver iterations per sample. "
-                             "Exact: the system math library and up to 6 iterations, for more CPU. They differ far below audibility.");
+    mathSelector.setTooltip ("Physical engine only. Fast: table-based exp, log and atan. Exact: the system math library, for "
+                             "about 15% more CPU. Same circuits, same solver; they differ far below audibility.");
     mathSelector.setTitle ("Tube math");
     addAndMakeVisible (mathSelector);
 

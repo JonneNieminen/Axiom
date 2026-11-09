@@ -41,6 +41,9 @@ target_sources(Axiom PRIVATE
     Source/AxiomDsp.h
     Source/PhysicalTubeStage.cpp
     Source/PhysicalTubeStage.h
+    Source/PhysicalCircuit.cpp
+    Source/PhysicalCircuit.h
+    Source/PhysicalMath.h
     Source/Presets.h
     Source/ToneMatchAnalyzer.cpp
     Source/ToneMatchAnalyzer.h
@@ -69,7 +72,7 @@ target_link_libraries(Axiom PRIVATE
 option(AXIOM_BUILD_TOOLS "Build developer tools (axiom-render)" OFF)
 if (AXIOM_BUILD_TOOLS)
     juce_add_console_app(AxiomRender PRODUCT_NAME "axiom-render")
-    target_sources(AxiomRender PRIVATE tools/render/Main.cpp Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp)
+    target_sources(AxiomRender PRIVATE tools/render/Main.cpp Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp Source/PhysicalCircuit.cpp)
     target_include_directories(AxiomRender PRIVATE Source)
     target_compile_definitions(AxiomRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(AxiomRender PRIVATE
@@ -80,7 +83,7 @@ if (AXIOM_BUILD_TOOLS)
     juce_add_console_app(AxiomSnapshot PRODUCT_NAME "axiom-snapshot")
     juce_generate_juce_header(AxiomSnapshot)
     target_sources(AxiomSnapshot PRIVATE tools/snapshot/Main.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp
-                                         Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp Source/ToneMatchAnalyzer.cpp)
+                                         Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp Source/PhysicalCircuit.cpp Source/ToneMatchAnalyzer.cpp)
     target_include_directories(AxiomSnapshot PRIVATE Source)
     target_compile_definitions(AxiomSnapshot PRIVATE JucePlugin_Name="Axiom" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(AxiomSnapshot PRIVATE
@@ -88,7 +91,7 @@ if (AXIOM_BUILD_TOOLS)
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
     # Compares Axiom with reference recordings and installed Audio Units (measurement only).
     juce_add_console_app(AxiomMatch PRODUCT_NAME "axiom-match")
-    target_sources(AxiomMatch PRIVATE tools/match/Main.cpp Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp)
+    target_sources(AxiomMatch PRIVATE tools/match/Main.cpp Source/AxiomDsp.cpp Source/PhysicalTubeStage.cpp Source/PhysicalCircuit.cpp)
     target_include_directories(AxiomMatch PRIVATE Source)
     target_compile_definitions(AxiomMatch PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_AU=1)
     target_link_libraries(AxiomMatch PRIVATE

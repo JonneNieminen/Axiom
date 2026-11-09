@@ -34,7 +34,7 @@ Everything runs locally.
 
 - **Organic gain staging**: cascaded asymmetric tube-style stages with coupling filters, power-amp sag and 8× oversampling, so overdrive stays smooth, dynamic and free of digital fizz. It cleans up when you roll your guitar volume down.
 - **Three amp voices**: Clean (glassy, lots of headroom), Classic (plexi-style crunch) and Modern (tight, hot-rodded high gain).
-- **Physical amp engine** (optional): the 12AX7 preamp stages, the power supply and the push-pull power amp solved as circuits, sample by sample, at 8× oversampling. Koren triode and pentode equations with grid conduction, Miller capacitance, a sagging rectifier and filter network that shifts every stage's bias, and a reactive output transformer and speaker load. **Tube Math** picks Fast (table-based math) or Exact (the system math library); they differ far below audibility. It costs several times the CPU of the Standard engine; see [`docs/PHYSICAL_ENGINE.md`](docs/PHYSICAL_ENGINE.md).
+- **Physical amp engine** (optional): the preamp (every 12AX7 stage, the pots, cathode follower and tone stack), the long-tail phase inverter with its presence/feedback network, the push-pull power amp and the power supply, each solved as one coupled circuit, sample by sample, at 8× oversampling. Measured-fit 12AX7 model with grid conduction and Miller capacitance; a sagging, rippling 50 Hz supply that moves every stage's bias; an output transformer that saturates; tube heating and the first stage's noise. Validated against ngspice. **Tube Math** picks Fast or Exact math. It costs roughly ten times the CPU of the Standard engine; see [`docs/PHYSICAL_ENGINE.md`](docs/PHYSICAL_ENGINE.md).
 - **Your own tones**: save the current sound from the preset menu and it is there in every session, standalone or in your DAW.
 - **Tone presets**: George Lynch, Van Halen, David Gilmour, Mark Knopfler (clean and Les Paul distorted) and a huge 80s chorus clean. Every control stays adjustable.
 - **Four-band tone section**, input trim, gain and master level, plus a mid-focused **Boost** in front of the amp. Tone knobs glide instead of stepping, so automating them never zips.
@@ -134,7 +134,7 @@ cmake --build build --config Release --target Axiom_Standalone Axiom_VST3 Axiom_
 
 Products appear under `build/Axiom_artefacts/Release/`. Use `x86_64` for Intel or `arm64;x86_64` for a universal binary, add `-DJUCE_DIR=/path/to/JUCE` if JUCE lives elsewhere, or use `-G Xcode` to generate an Xcode project. Open the folder in VS Code with the recommended CMake Tools extension to build from the editor.
 
-Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck on both amp engines, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, the Physical engine's operating points, supply sag, solver convergence, stability, Fast-vs-Exact agreement and engine switching, measures CPU, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/axiom-dark.png 1` renders the interface to a PNG without a host (add a preset number, then `tuner`, `save` or `light`); it is how the README screenshots are made. `AxiomMatch` compares Axiom with reference recordings and, on your own machine, any installed Audio Unit you own, as a measuring yardstick (`AxiomMatch analyze|render|au|diff`). `AxiomSnapshot --check` tests user presets and session state.
+Run the DSP checks with `-DAXIOM_BUILD_TOOLS=ON`, then `cmake --build build --target AxiomRender` and `build/AxiomRender_artefacts/Release/AxiomRender [wav-output-dir]`. It renders every preset through a synthetic pluck on both amp engines, reports level, spectral balance, aliasing and THD, checks the noise gate and the tuner, the Physical engine's operating points, analytic Jacobians, agreement with ngspice (when installed), supply sag, solver convergence, noise and hum, transformer saturation, Fast-vs-Exact agreement, pot sweeps and engine switching, measures CPU, and optionally writes WAV files. `build/AxiomSnapshot_artefacts/Release/AxiomSnapshot docs/screenshots/axiom-dark.png 1` renders the interface to a PNG without a host (add a preset number, then `tuner`, `save` or `light`); it is how the README screenshots are made. `AxiomMatch` compares Axiom with reference recordings and, on your own machine, any installed Audio Unit you own, as a measuring yardstick (`AxiomMatch analyze|render|au|diff`). `AxiomSnapshot --check` tests user presets and session state.
 
 Build the drag-to-install DMG with `build/macos/make-dmg.sh build/Axiom_artefacts/Release/Standalone/Axiom.app 1.0.0 arm64 dist`.
 
@@ -146,8 +146,9 @@ CI ([`build.yml`](.github/workflows/build.yml)) builds all three targets for App
 Host / audio device ──▶ AxiomAudioProcessor ──▶ AxiomDsp ──▶ stereo output
    input select → trim → drive → [8× oversampled: boost → tube stages → tone stack
    → power amp + sag → presence] → cabinet → master → chorus → delay → room
-   (Physical engine: its own 8× section, 12AX7 stages → tone stack → phase inverter
-    → push-pull pentodes → transformer + speaker, all drawing on a reactive supply)
+   (Physical engine: its own 8× section: coupled preamp circuit (stages, pots, tone stack)
+    → coupled phase-inverter circuit → push-pull pentodes → transformer + speaker,
+    all drawing on a 50 Hz rectifier supply)
 
 AxiomAudioProcessorEditor ──▶ parameters (AudioProcessorValueTreeState)
         └─ Tone Match: worker thread → FFT analysis → suggestion → Apply tone
@@ -156,7 +157,7 @@ AxiomAudioProcessorEditor ──▶ parameters (AudioProcessorValueTreeState)
 | Path | What's there |
 |---|---|
 | [`Source/AxiomDsp.*`](Source/AxiomDsp.cpp) | The signal path: oversampled amp, cabinet, chorus, delay and room. Real-time safe. |
-| [`Source/PhysicalTubeStage.*`](Source/PhysicalTubeStage.h) | The Physical engine: netlist → MNA → DK state space, Newton-Raphson tube solves, power supply, push-pull power amp. |
+| [`Source/Physical*`](Source/PhysicalTubeStage.h) | The Physical engine: netlists → MNA → DK state space, coupled Newton-Raphson tube solves, phase inverter, power amp, transformer core, supply. |
 | [`Source/Presets.h`](Source/Presets.h) | Factory tone presets. |
 | [`Source/PluginProcessor.*`](Source/PluginProcessor.cpp) | Host parameters, presets as programs and state. |
 | [`tools/render`](tools/render/Main.cpp) | `axiom-render`: offline level, balance, aliasing and sample-rate checks. |

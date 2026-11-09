@@ -305,7 +305,6 @@ struct AxiomDsp::Impl
     juce::SmoothedValue<double> engineMix;      // 0 = Standard, 1 = Physical
     bool stdRunning = true, physRunning = false;
     OnePole physBoostHp, physBoostLp;
-    Biquad physBass, physMid, physTreble, physPresence;
     double physBoostNow = 0.0;
 
     AxiomParams last;
@@ -321,7 +320,7 @@ struct AxiomDsp::Impl
         monoPhys.assign ((size_t) maxBlock, 0.0f);
         physInput.reset (fs, 0.04);
         engineMix.reset (fs, 0.03);
-        physicalAmp.prepare (fsOs);
+        physicalAmp.prepare (fsOs, 8);
         mono.assign ((size_t) maxBlock, 0.0f);
         left.assign ((size_t) maxBlock, 0.0f);
         right.assign ((size_t) maxBlock, 0.0f);
@@ -367,6 +366,8 @@ struct AxiomDsp::Impl
         for (auto& f : stageLp) f.reset();
         sagEnv = 0.0;
         boostNow = boostTarget;
+        eqNow = eqTarget;
+        designEq();
     }
 
     void resetPhysical()
@@ -374,7 +375,6 @@ struct AxiomDsp::Impl
         osPhys.reset();
         physicalAmp.reset();
         physBoostHp.reset(); physBoostLp.reset();
-        physBass.reset(); physMid.reset(); physTreble.reset(); physPresence.reset();
         physBoostNow = boostTarget;
     }
 
@@ -387,10 +387,6 @@ struct AxiomDsp::Impl
         mid.set (peak (fsOs, v.midHz, v.midQ, eqNow[1]));
         treble.set (highShelf (fsOs, v.trebleHz, 0.7, eqNow[2]));
         presence.set (highShelf (fsOs, v.presenceHz, 0.7, eqNow[3]));
-        physBass.set (lowShelf (fsOs, v.bassHz, 0.7, eqNow[0]));
-        physMid.set (peak (fsOs, v.midHz, v.midQ, eqNow[1]));
-        physTreble.set (highShelf (fsOs, v.trebleHz, 0.7, eqNow[2]));
-        physPresence.set (highShelf (fsOs, v.presenceHz, 0.7, eqNow[3]));
     }
 
     void stepEq()
@@ -470,7 +466,10 @@ struct AxiomDsp::Impl
         inputGain = dbToLin (p.inputDb);
         drive.setTargetValue ((float) (dbToLin (driveDb) * inputGain));
         physInput.setTargetValue ((float) inputGain);
-        physicalAmp.setGain (knob);
+        // On the Physical engine the knobs turn the circuit's own pots: Gain is the volume pot,
+        // Bass/Middle/Treble the tone stack, Presence the feedback network (0 dB = noon).
+        const auto rotation = [] (float db) { return juce::jlimit (0.0, 1.0, ((double) db + 12.0) / 24.0); };
+        physicalAmp.setPots ({ knob, rotation (p.bassDb), rotation (p.midDb), rotation (p.trebleDb), rotation (p.presenceDb) });
         physicalAmp.setMathMode (p.tubeMath == 1 ? physical::MathMode::exact : physical::MathMode::fast);
         engineMix.setTargetValue (p.engine == 1 ? 1.0 : 0.0);
         if (! engineMixPrimed)
@@ -533,22 +532,14 @@ struct AxiomDsp::Impl
         return x * (1.0 - b) + mids * b * (1.0 + 4.0 * b);
     }
 
-    /** One oversampled block through the Physical engine, in place. */
-    void processPhysical (float* u, size_t numSamples, bool steppingEq)
+    /** One oversampled block through the Physical engine, in place. The tone stack and the
+        presence network are part of its circuits, so nothing else happens here but the pedal. */
+    void processPhysical (float* u, size_t numSamples)
     {
-        const auto tone = [this] (double v) { return physTreble.process (physMid.process (physBass.process (v))); };
+        for (size_t k = 0; k < numSamples; ++k)
+            u[k] = (float) physBoost ((double) u[k]);
         for (size_t k = 0; k < numSamples; k += (size_t) eqStep)
-        {
-            if (steppingEq)
-                stepEq();
-            const int len = (int) std::min ((size_t) eqStep, numSamples - k);
-            float* chunk = u + k;
-            for (int j = 0; j < len; ++j)
-                chunk[j] = (float) physBoost ((double) chunk[j]);
-            physicalAmp.process (chunk, len, tone);
-            for (int j = 0; j < len; ++j)
-                chunk[j] = (float) physPresence.process ((double) chunk[j]);
-        }
+            physicalAmp.process (u + k, (int) std::min ((size_t) eqStep, numSamples - k));
     }
 
     double cabSample (double x)
@@ -610,7 +601,7 @@ struct AxiomDsp::Impl
                 float* channels[1] { monoPhys.data() };
                 juce::dsp::AudioBlock<float> block (channels, 1, (size_t) n);
                 auto up = osPhys.processSamplesUp (block);
-                processPhysical (up.getChannelPointer (0), up.getNumSamples(), ! runStd);
+                processPhysical (up.getChannelPointer (0), up.getNumSamples());
                 osPhys.processSamplesDown (block);
 
                 if (runStd)
@@ -670,6 +661,7 @@ AxiomDsp::AxiomDsp() : impl (std::make_unique<Impl>()) {}
 AxiomDsp::~AxiomDsp() = default;
 void AxiomDsp::prepare (double sampleRate, int maxBlockSize) { impl->prepare (sampleRate, maxBlockSize); }
 void AxiomDsp::reset() { impl->reset(); }
+void AxiomDsp::setPhysicalNoise (bool on) { impl->physicalAmp.setNoise (on); impl->physicalAmp.setMainsRipple (on); }
 int AxiomDsp::getLatencySamples() const { return (int) std::lround (impl->os.getLatencyInSamples()); }
 void AxiomDsp::process (const float* inL, const float* inR, float* outL, float* outR, int n, const AxiomParams& p)
 {

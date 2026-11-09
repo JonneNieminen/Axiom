@@ -50,6 +50,9 @@ public:
 
     void prepare (double sampleRate, int maxBlockSize);
     void reset();
+    /** The Physical engine models the first stage's thermal and flicker noise and the supply's
+        mains ripple; the offline checks switch both off where they would mask what they measure. */
+    void setPhysicalNoise (bool on);
     int getLatencySamples() const;
 
     /** inR and outR may be null for a mono bus. Input and output may alias. */
